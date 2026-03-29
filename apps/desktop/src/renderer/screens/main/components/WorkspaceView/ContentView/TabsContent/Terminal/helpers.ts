@@ -106,7 +106,7 @@ function getPreferredRenderer(): PreferredRenderer {
 	return "auto";
 }
 
-function loadRenderer(xterm: XTerm): TerminalRenderer {
+export function loadRenderer(xterm: XTerm): TerminalRenderer {
 	let webglAddon: WebglAddon | null = null;
 	let kind: TerminalRenderer["kind"] = "dom";
 
@@ -196,11 +196,12 @@ export function createTerminalInstance(
 
 	const clipboardAddon = new ClipboardAddon();
 	const unicode11Addon = new Unicode11Addon();
-	const imageAddon = new ImageAddon();
 
 	// Track cleanup state to prevent operations on disposed terminal
 	let isDisposed = false;
 	let rafId: number | null = null;
+	let imageIdleId: ReturnType<typeof requestIdleCallback> | null = null;
+	let ligaturesIdleId: ReturnType<typeof requestIdleCallback> | null = null;
 
 	// Use a ref pattern so the renderer can be updated after rAF.
 	// Start with a no-op DOM renderer - the actual GPU renderer is loaded async.
@@ -218,7 +219,6 @@ export function createTerminalInstance(
 	xterm.loadAddon(fitAddon);
 	xterm.loadAddon(clipboardAddon);
 	xterm.loadAddon(unicode11Addon);
-	xterm.loadAddon(imageAddon);
 
 	// Defer GPU renderer loading to next animation frame.
 	// xterm.open() schedules a setTimeout for Viewport.syncScrollArea which expects
@@ -233,13 +233,28 @@ export function createTerminalInstance(
 		rendererRef.current = loadRenderer(xterm);
 	});
 
-	try {
-		if (!isDisposed) {
-			xterm.loadAddon(new LigaturesAddon());
-		}
-	} catch {
-		// Ligatures not supported by current font
-	}
+	// Defer heavy addons to avoid blocking initial terminal paint
+	imageIdleId = requestIdleCallback(
+		() => {
+			imageIdleId = null;
+			if (isDisposed) return;
+			xterm.loadAddon(new ImageAddon());
+		},
+		{ timeout: 1000 },
+	);
+
+	ligaturesIdleId = requestIdleCallback(
+		() => {
+			ligaturesIdleId = null;
+			if (isDisposed) return;
+			try {
+				xterm.loadAddon(new LigaturesAddon());
+			} catch {
+				// Ligatures not supported by current font
+			}
+		},
+		{ timeout: 2000 },
+	);
 
 	const cleanupQuerySuppression = suppressQueryResponses(xterm);
 
@@ -298,6 +313,12 @@ export function createTerminalInstance(
 			isDisposed = true;
 			if (rafId !== null) {
 				cancelAnimationFrame(rafId);
+			}
+			if (imageIdleId !== null) {
+				cancelIdleCallback(imageIdleId);
+			}
+			if (ligaturesIdleId !== null) {
+				cancelIdleCallback(ligaturesIdleId);
 			}
 			cleanupQuerySuppression();
 			rendererRef.current.dispose();

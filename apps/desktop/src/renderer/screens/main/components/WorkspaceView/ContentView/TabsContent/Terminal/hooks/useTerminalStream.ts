@@ -1,10 +1,11 @@
 import { toast } from "@superset/ui/sonner";
 import type { Terminal as XTerm } from "@xterm/xterm";
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useTabsStore } from "renderer/stores/tabs/store";
 import { setPaneWorkspaceRunState } from "renderer/stores/tabs/workspace-run";
 import { DEBUG_TERMINAL } from "../config";
 import type { TerminalExitReason, TerminalStreamEvent } from "../types";
+import { WriteBatcher } from "../write-batcher";
 
 export interface UseTerminalStreamOptions {
 	paneId: string;
@@ -47,6 +48,17 @@ export function useTerminalStream({
 	const setPaneStatus = useTabsStore((s) => s.setPaneStatus);
 	const removePane = useTabsStore((s) => s.removePane);
 	const firstStreamDataReceivedRef = useRef(false);
+	const batcherRef = useRef<WriteBatcher>(new WriteBatcher());
+
+	// Attach/detach batcher to xterm instance
+	useEffect(() => {
+		const xterm = xtermRef.current;
+		const batcher = batcherRef.current;
+		if (xterm) {
+			batcher.attach(xterm);
+		}
+		return () => batcher.detach();
+	}, [xtermRef.current]);
 
 	// Refs to use latest values in callbacks
 	const updateModesRef = useRef(updateModesFromData);
@@ -172,7 +184,7 @@ export function useTerminalStream({
 				}
 
 				updateModesRef.current(event.data);
-				xterm.write(event.data);
+				batcherRef.current.write(event.data);
 				updateCwdRef.current(event.data);
 			} else if (event.type === "exit") {
 				handleTerminalExit(event.exitCode, xterm, event.reason);

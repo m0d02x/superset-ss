@@ -2,8 +2,12 @@ import { Button } from "@superset/ui/button";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal as XTerm } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
+import { debounce } from "lodash";
 import { useEffect, useRef, useState } from "react";
 import { electronTrpc } from "renderer/lib/electron-trpc";
+import { RESIZE_DEBOUNCE_MS } from "renderer/screens/main/components/WorkspaceView/ContentView/TabsContent/Terminal/config";
+import { loadRenderer } from "renderer/screens/main/components/WorkspaceView/ContentView/TabsContent/Terminal/helpers";
+import { WriteBatcher } from "renderer/screens/main/components/WorkspaceView/ContentView/TabsContent/Terminal/write-batcher";
 
 interface SSHTerminalProps {
 	serverId: string;
@@ -19,6 +23,8 @@ export function SSHTerminal({ serverId, cwd }: SSHTerminalProps) {
 	);
 	const [sessionId, setSessionId] = useState<string | null>(null);
 	const terminalRef = useRef<XTerm | null>(null);
+
+	const batcherRef = useRef(new WriteBatcher());
 
 	const openShell = electronTrpc.servers.openShell.useMutation();
 	const writeShell = electronTrpc.servers.writeShell.useMutation();
@@ -56,8 +62,9 @@ export function SSHTerminal({ serverId, cwd }: SSHTerminalProps) {
 			enabled: !!sessionId,
 			onData: (msg) => {
 				if (msg.type === "data") {
-					terminalRef.current?.write(msg.data);
+					batcherRef.current.write(msg.data);
 				} else if (msg.type === "close") {
+					batcherRef.current.flush();
 					terminalRef.current?.writeln("\r\n[session closed]");
 					setStatus("closed");
 				}
@@ -75,6 +82,7 @@ export function SSHTerminal({ serverId, cwd }: SSHTerminalProps) {
 			fontFamily:
 				'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
 			fontSize: 13,
+			scrollback: 1500,
 			theme: {
 				background: "#14100f",
 				foreground: "#f5efe9",
@@ -85,6 +93,16 @@ export function SSHTerminal({ serverId, cwd }: SSHTerminalProps) {
 		terminal.open(container);
 		fitAddon.fit();
 		terminal.focus();
+
+		// Load GPU renderer after open to avoid race with xterm internals
+		let rendererDispose: (() => void) | null = null;
+		const rendererRafId = requestAnimationFrame(() => {
+			const renderer = loadRenderer(terminal);
+			rendererDispose = renderer.dispose;
+		});
+
+		// Attach write batcher
+		batcherRef.current.attach(terminal);
 
 		setStatus("connecting");
 
@@ -106,20 +124,22 @@ export function SSHTerminal({ serverId, cwd }: SSHTerminalProps) {
 						writeShellRef.current({ sessionId: sid, data });
 					});
 
-					// Wire resize
-					const resizeObserver = new ResizeObserver(() => {
+					// Wire resize with debounce to prevent layout thrashing
+					const debouncedResize = debounce(() => {
 						fitAddon.fit();
 						resizeShellRef.current({
 							sessionId: sid,
 							cols: terminal.cols,
 							rows: terminal.rows,
 						});
-					});
+					}, RESIZE_DEBOUNCE_MS);
+					const resizeObserver = new ResizeObserver(debouncedResize);
 					resizeObserver.observe(container);
 
 					// Cleanup on unmount stored in ref
 					cleanupRef.current = () => {
 						onDataDispose.dispose();
+						debouncedResize.cancel();
 						resizeObserver.disconnect();
 						closeShellRef.current({ sessionId: sid });
 					};
@@ -135,6 +155,9 @@ export function SSHTerminal({ serverId, cwd }: SSHTerminalProps) {
 
 		return () => {
 			cleanupRef.current?.();
+			cancelAnimationFrame(rendererRafId);
+			rendererDispose?.();
+			batcherRef.current.dispose();
 			terminal.dispose();
 			terminalRef.current = null;
 		};

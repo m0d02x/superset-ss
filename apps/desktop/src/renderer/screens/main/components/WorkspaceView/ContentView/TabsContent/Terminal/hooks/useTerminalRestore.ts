@@ -91,19 +91,36 @@ export function useTerminalRestore({
 			0,
 			pendingEventsRef.current.length,
 		);
+
+		// Batch consecutive data events into a single xterm.write() call
+		let dataBuffer: string[] = [];
+
+		const flushDataBuffer = () => {
+			if (dataBuffer.length === 0) return;
+			const joined = dataBuffer.join("");
+			dataBuffer = [];
+			xterm.write(joined);
+		};
+
 		for (const event of events) {
 			if (event.type === "data") {
 				updateModesRef.current(event.data);
-				xterm.write(event.data);
+				dataBuffer.push(event.data);
 				updateCwdRef.current(event.data);
-			} else if (event.type === "exit") {
-				onExitEventRef.current(event.exitCode, xterm, event.reason);
-			} else if (event.type === "error") {
-				onErrorEventRef.current(event, xterm);
-			} else if (event.type === "disconnect") {
-				onDisconnectEventRef.current(event.reason);
+			} else {
+				// Flush accumulated data before processing non-data events
+				flushDataBuffer();
+				if (event.type === "exit") {
+					onExitEventRef.current(event.exitCode, xterm, event.reason);
+				} else if (event.type === "error") {
+					onErrorEventRef.current(event, xterm);
+				} else if (event.type === "disconnect") {
+					onDisconnectEventRef.current(event.reason);
+				}
 			}
 		}
+		// Flush any remaining data
+		flushDataBuffer();
 	}, [xtermRef, pendingEventsRef]);
 
 	const maybeApplyInitialState = useCallback(() => {
