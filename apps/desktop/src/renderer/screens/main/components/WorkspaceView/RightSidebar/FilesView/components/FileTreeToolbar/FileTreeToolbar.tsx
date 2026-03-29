@@ -19,6 +19,8 @@ interface FileTreeToolbarProps {
 	onCollapseAll: () => void;
 	onRefresh: () => void;
 	isRefreshing?: boolean;
+	hideCreateActions?: boolean;
+	hideSearch?: boolean;
 }
 
 export function FileTreeToolbar({
@@ -29,6 +31,8 @@ export function FileTreeToolbar({
 	onCollapseAll,
 	onRefresh,
 	isRefreshing = false,
+	hideCreateActions = false,
+	hideSearch = false,
 }: FileTreeToolbarProps) {
 	const [localSearchTerm, setLocalSearchTerm] = useState(searchTerm);
 	const debounceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -77,53 +81,59 @@ export function FileTreeToolbar({
 
 	return (
 		<div className="flex flex-col gap-1 px-2 py-1.5 border-b border-border">
-			<div className="relative">
-				<Input
-					type="text"
-					placeholder="Search files..."
-					value={localSearchTerm}
-					onChange={handleSearchChange}
-					className="h-7 text-xs pr-7"
-				/>
-				{localSearchTerm && (
-					<button
-						type="button"
-						onClick={handleClearSearch}
-						className="absolute right-1 top-1/2 -translate-y-1/2 p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-muted-foreground/20 transition-colors"
-					>
-						<LuX className="size-3.5" />
-					</button>
-				)}
-			</div>
+			{!hideSearch && (
+				<div className="relative">
+					<Input
+						type="text"
+						placeholder="Search files..."
+						value={localSearchTerm}
+						onChange={handleSearchChange}
+						className="h-7 text-xs pr-7"
+					/>
+					{localSearchTerm && (
+						<button
+							type="button"
+							onClick={handleClearSearch}
+							className="absolute right-1 top-1/2 -translate-y-1/2 p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-muted-foreground/20 transition-colors"
+						>
+							<LuX className="size-3.5" />
+						</button>
+					)}
+				</div>
+			)}
 
 			<div className="flex items-center gap-0.5">
-				<Tooltip>
-					<TooltipTrigger asChild>
-						<Button
-							variant="ghost"
-							size="icon"
-							className="size-6"
-							onClick={onNewFile}
-						>
-							<LuFilePlus className="size-3.5" />
-						</Button>
-					</TooltipTrigger>
-					<TooltipContent side="bottom">New File</TooltipContent>
-				</Tooltip>
+				{!hideCreateActions && (
+					<>
+						<Tooltip>
+							<TooltipTrigger asChild>
+								<Button
+									variant="ghost"
+									size="icon"
+									className="size-6"
+									onClick={onNewFile}
+								>
+									<LuFilePlus className="size-3.5" />
+								</Button>
+							</TooltipTrigger>
+							<TooltipContent side="bottom">New File</TooltipContent>
+						</Tooltip>
 
-				<Tooltip>
-					<TooltipTrigger asChild>
-						<Button
-							variant="ghost"
-							size="icon"
-							className="size-6"
-							onClick={onNewFolder}
-						>
-							<LuFolderPlus className="size-3.5" />
-						</Button>
-					</TooltipTrigger>
-					<TooltipContent side="bottom">New Folder</TooltipContent>
-				</Tooltip>
+						<Tooltip>
+							<TooltipTrigger asChild>
+								<Button
+									variant="ghost"
+									size="icon"
+									className="size-6"
+									onClick={onNewFolder}
+								>
+									<LuFolderPlus className="size-3.5" />
+								</Button>
+							</TooltipTrigger>
+							<TooltipContent side="bottom">New Folder</TooltipContent>
+						</Tooltip>
+					</>
+				)}
 
 				<div className="flex-1" />
 

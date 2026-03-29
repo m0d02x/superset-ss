@@ -25,3 +25,13 @@ export interface DirectoryEntry {
 	relativePath: string;
 	isDirectory: boolean;
 }
+
+export interface FileTreeDataAdapter {
+	getChildren(path: string): Promise<DirectoryEntry[]>;
+	createFile?(parentPath: string, name: string): Promise<void>;
+	createDirectory?(parentPath: string, name: string): Promise<void>;
+	rename?(absolutePath: string, newName: string): Promise<void>;
+	deleteItems?(absolutePaths: string[]): Promise<void>;
+	searchFiles?(query: string): Promise<DirectoryEntry[]>;
+	useFileEvents?(onEvent: (event: FileSystemChangeEvent) => void): void;
+}

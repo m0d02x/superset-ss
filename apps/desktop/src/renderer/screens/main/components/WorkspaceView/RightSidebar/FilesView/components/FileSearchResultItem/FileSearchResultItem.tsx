@@ -31,6 +31,8 @@ interface FileSearchResultItemProps {
 	onNewFolder: (parentPath: string) => void;
 	onRename: (entry: DirectoryEntry) => void;
 	onDelete: (entry: DirectoryEntry) => void;
+	hideCreateActions?: boolean;
+	hideMutationActions?: boolean;
 }
 
 const PATH_LABEL_MAX_CHARS = 48;
@@ -62,6 +64,8 @@ export function FileSearchResultItem({
 	onNewFolder,
 	onRename,
 	onDelete,
+	hideCreateActions = false,
+	hideMutationActions = false,
 }: FileSearchResultItemProps) {
 	const folderLabel = getFolderLabel(entry.relativePath);
 	const folderLabelDisplay = truncatePathStart(
@@ -144,16 +148,20 @@ export function FileSearchResultItem({
 		<ContextMenu>
 			<ContextMenuTrigger asChild>{itemContent}</ContextMenuTrigger>
 			<ContextMenuContent className="w-48">
-				<ContextMenuItem onClick={() => onNewFile(parentPath)}>
-					<LuFile className="mr-2 size-4" />
-					New File
-				</ContextMenuItem>
-				<ContextMenuItem onClick={() => onNewFolder(parentPath)}>
-					<LuFolder className="mr-2 size-4" />
-					New Folder
-				</ContextMenuItem>
+				{!hideCreateActions && (
+					<>
+						<ContextMenuItem onClick={() => onNewFile(parentPath)}>
+							<LuFile className="mr-2 size-4" />
+							New File
+						</ContextMenuItem>
+						<ContextMenuItem onClick={() => onNewFolder(parentPath)}>
+							<LuFolder className="mr-2 size-4" />
+							New Folder
+						</ContextMenuItem>
 
-				<ContextMenuSeparator />
+						<ContextMenuSeparator />
+					</>
+				)}
 
 				<ContextMenuItem onClick={copyPath}>
 					<LuClipboard className="mr-2 size-4" />
@@ -175,19 +183,23 @@ export function FileSearchResultItem({
 					Open in Editor
 				</ContextMenuItem>
 
-				<ContextMenuSeparator />
+				{!hideMutationActions && (
+					<>
+						<ContextMenuSeparator />
 
-				<ContextMenuItem onClick={() => onRename(entry)}>
-					<LuPencil className="mr-2 size-4" />
-					Rename
-				</ContextMenuItem>
-				<ContextMenuItem
-					onClick={() => onDelete(entry)}
-					className="text-destructive focus:text-destructive"
-				>
-					<LuTrash2 className="mr-2 size-4" />
-					Delete
-				</ContextMenuItem>
+						<ContextMenuItem onClick={() => onRename(entry)}>
+							<LuPencil className="mr-2 size-4" />
+							Rename
+						</ContextMenuItem>
+						<ContextMenuItem
+							onClick={() => onDelete(entry)}
+							className="text-destructive focus:text-destructive"
+						>
+							<LuTrash2 className="mr-2 size-4" />
+							Delete
+						</ContextMenuItem>
+					</>
+				)}
 			</ContextMenuContent>
 		</ContextMenu>
 	);

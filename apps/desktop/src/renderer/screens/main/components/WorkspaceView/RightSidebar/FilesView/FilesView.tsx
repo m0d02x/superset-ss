@@ -15,7 +15,6 @@ import { useParams } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LuFile, LuFolder } from "react-icons/lu";
 import { electronTrpc } from "renderer/lib/electron-trpc";
-import { useWorkspaceFileEvents } from "renderer/screens/main/components/WorkspaceView/hooks/useWorkspaceFileEvents";
 import { useTabsStore } from "renderer/stores/tabs/store";
 import {
 	retargetAbsolutePath,
@@ -24,7 +23,12 @@ import {
 import type {
 	DirectoryEntry,
 	FileSystemChangeEvent,
+	FileTreeDataAdapter,
 } from "shared/file-tree-types";
+import {
+	type LocalFileTreeDataAdapter,
+	useLocalFileTreeAdapter,
+} from "./adapters";
 import { DeleteConfirmDialog } from "./components/DeleteConfirmDialog";
 import { FileSearchResultItem } from "./components/FileSearchResultItem";
 import { FileTreeItem } from "./components/FileTreeItem";
@@ -33,7 +37,6 @@ import { NewItemInput } from "./components/NewItemInput";
 import { RenameInput } from "./components/RenameInput";
 import { ROW_HEIGHT, TREE_INDENT } from "./constants";
 import { useFileSearch } from "./hooks/useFileSearch";
-import { useFileTreeActions } from "./hooks/useFileTreeActions";
 import type { NewItemMode } from "./types";
 
 interface PendingTreeRefresh {
@@ -50,7 +53,7 @@ interface FileTreeController {
 	): ItemInstance<DirectoryEntry> | null | undefined;
 }
 
-function getEntryRelativePath(rootPath: string, absolutePath: string): string {
+function _getEntryRelativePath(rootPath: string, absolutePath: string): string {
 	const relativePath = toRelativeWorkspacePath(rootPath, absolutePath);
 	return relativePath === "." ? "" : relativePath;
 }
@@ -140,13 +143,29 @@ async function restoreExpandedDirectories(
 	}
 }
 
-export function FilesView() {
+interface FilesViewProps {
+	adapter?: FileTreeDataAdapter;
+	rootPath?: string;
+	onFileActivate?: (entry: DirectoryEntry) => void;
+}
+
+function isLocalFileTreeAdapter(
+	adapter: FileTreeDataAdapter,
+): adapter is LocalFileTreeDataAdapter {
+	return "isDeleting" in adapter;
+}
+
+export function FilesView({
+	adapter: adapterProp,
+	rootPath,
+	onFileActivate,
+}: FilesViewProps = {}) {
 	const { workspaceId } = useParams({ strict: false });
 	const { data: workspace } = electronTrpc.workspaces.get.useQuery(
 		{ id: workspaceId ?? "" },
 		{ enabled: !!workspaceId },
 	);
-	const worktreePath = workspace?.worktreePath;
+	const worktreePath = rootPath ?? workspace?.worktreePath;
 
 	const [searchTerm, setSearchTerm] = useState("");
 	const projectId = workspace?.project?.id;
@@ -164,6 +183,36 @@ export function FilesView() {
 	});
 
 	const trpcUtils = electronTrpc.useUtils();
+	const localAdapter = useLocalFileTreeAdapter({
+		workspaceId,
+		worktreePath,
+		onRefresh: async (parentPath: string) => {
+			const isRoot = parentPath === worktreePath;
+			const itemId = isRoot
+				? "root"
+				: tree
+						.getItems()
+						.find(
+							(item: ItemInstance<DirectoryEntry>) =>
+								item.getItemData()?.path === parentPath,
+						)
+						?.getId();
+			if (itemId) {
+				await tree.getItemInstance(itemId)?.invalidateChildrenIds();
+			}
+		},
+	});
+	const adapter = adapterProp ?? localAdapter;
+	const supportsCreateActions = Boolean(
+		adapter.createFile && adapter.createDirectory,
+	);
+	const supportsMutationActions = Boolean(
+		adapter.rename && adapter.deleteItems,
+	);
+	const hideSearch = !workspaceId;
+	const isDeleting = isLocalFileTreeAdapter(adapter)
+		? adapter.isDeleting
+		: false;
 
 	const tree = useTree<DirectoryEntry>({
 		rootItemId: "root",
@@ -211,17 +260,7 @@ export function FilesView() {
 				if (!dirPath) return [];
 
 				try {
-					const { entries } = await trpcUtils.filesystem.listDirectory.fetch({
-						workspaceId: workspaceId ?? "",
-						absolutePath: dirPath,
-					});
-					const nextEntries = entries.map((entry) => ({
-						id: entry.absolutePath,
-						name: entry.name,
-						path: entry.absolutePath,
-						relativePath: getEntryRelativePath(currentPath, entry.absolutePath),
-						isDirectory: entry.kind === "directory",
-					}));
+					const nextEntries = await adapter.getChildren(dirPath);
 					for (const entry of nextEntries) {
 						entryCacheRef.current.set(entry.path, entry);
 					}
@@ -367,34 +406,8 @@ export function FilesView() {
 		};
 	}, []);
 
-	useWorkspaceFileEvents(
-		workspaceId ?? "",
-		(event) => {
-			scheduleRefresh(event);
-		},
-		Boolean(workspaceId && worktreePath),
-	);
-
-	const { createFile, createDirectory, rename, deleteItems, isDeleting } =
-		useFileTreeActions({
-			workspaceId,
-			worktreePath,
-			onRefresh: async (parentPath: string) => {
-				const isRoot = parentPath === worktreePath;
-				const itemId = isRoot
-					? "root"
-					: tree
-							.getItems()
-							.find(
-								(item: ItemInstance<DirectoryEntry>) =>
-									item.getItemData()?.path === parentPath,
-							)
-							?.getId();
-				if (itemId) {
-					await tree.getItemInstance(itemId)?.invalidateChildrenIds();
-				}
-			},
-		});
+	const useFileEventsHook = adapter.useFileEvents ?? (() => undefined);
+	useFileEventsHook(scheduleRefresh);
 
 	const {
 		searchResults,
@@ -417,13 +430,18 @@ export function FilesView() {
 
 	const handleFileActivate = useCallback(
 		(entry: DirectoryEntry, openInNewTab?: boolean) => {
-			if (!workspaceId || !worktreePath || entry.isDirectory) return;
+			if (entry.isDirectory) return;
+			if (onFileActivate) {
+				onFileActivate(entry);
+				return;
+			}
+			if (!workspaceId || !worktreePath) return;
 			addFileViewerPane(workspaceId, {
 				filePath: entry.path,
 				openInNewTab,
 			});
 		},
-		[workspaceId, worktreePath, addFileViewerPane],
+		[workspaceId, worktreePath, addFileViewerPane, onFileActivate],
 	);
 
 	const handleOpenInEditor = useCallback(
@@ -479,14 +497,14 @@ export function FilesView() {
 	const handleNewItemSubmit = useCallback(
 		(name: string) => {
 			if (newItemMode === "file") {
-				createFile(newItemParentPath, name);
+				void adapter.createFile?.(newItemParentPath, name);
 			} else if (newItemMode === "folder") {
-				createDirectory(newItemParentPath, name);
+				void adapter.createDirectory?.(newItemParentPath, name);
 			}
 			setNewItemMode(null);
 			setNewItemParentPath("");
 		},
-		[newItemMode, newItemParentPath, createFile, createDirectory],
+		[newItemMode, newItemParentPath, adapter],
 	);
 
 	const handleNewItemCancel = useCallback(() => {
@@ -501,11 +519,11 @@ export function FilesView() {
 
 	const handleDeleteConfirm = useCallback(() => {
 		if (deleteEntry) {
-			deleteItems([deleteEntry.path]);
+			void adapter.deleteItems?.([deleteEntry.path]);
 		}
 		setShowDeleteDialog(false);
 		setDeleteEntry(null);
-	}, [deleteEntry, deleteItems]);
+	}, [deleteEntry, adapter]);
 
 	const handleRename = useCallback((entry: DirectoryEntry) => {
 		setRenameEntry(entry);
@@ -514,11 +532,11 @@ export function FilesView() {
 	const handleRenameSubmit = useCallback(
 		(newName: string) => {
 			if (renameEntry) {
-				rename(renameEntry.path, newName);
+				void adapter.rename?.(renameEntry.path, newName);
 			}
 			setRenameEntry(null);
 		},
-		[renameEntry, rename],
+		[renameEntry, adapter],
 	);
 
 	const handleRenameCancel = useCallback(() => {
@@ -560,6 +578,8 @@ export function FilesView() {
 				onNewFolder={() => handleNewFolder(worktreePath)}
 				onCollapseAll={handleCollapseAll}
 				onRefresh={handleRefresh}
+				hideCreateActions={!supportsCreateActions}
+				hideSearch={hideSearch}
 			/>
 
 			<div className="flex-1 min-h-0 overflow-hidden">
@@ -598,6 +618,8 @@ export function FilesView() {
 													onNewFolder={handleNewFolder}
 													onRename={handleRename}
 													onDelete={handleDeleteRequest}
+													hideCreateActions={!supportsCreateActions}
+													hideMutationActions={!supportsMutationActions}
 												/>
 											),
 										)}
@@ -642,6 +664,8 @@ export function FilesView() {
 														onNewFolder={handleNewFolder}
 														onRename={handleRename}
 														onDelete={handleDeleteRequest}
+														hideCreateActions={!supportsCreateActions}
+														hideMutationActions={!supportsMutationActions}
 													/>
 												)}
 												{showNewItemInput && (
@@ -661,14 +685,18 @@ export function FilesView() {
 						</div>
 					</ContextMenuTrigger>
 					<ContextMenuContent className="w-48">
-						<ContextMenuItem onClick={() => handleNewFile(worktreePath)}>
-							<LuFile className="mr-2 size-4" />
-							New File
-						</ContextMenuItem>
-						<ContextMenuItem onClick={() => handleNewFolder(worktreePath)}>
-							<LuFolder className="mr-2 size-4" />
-							New Folder
-						</ContextMenuItem>
+						{supportsCreateActions && (
+							<>
+								<ContextMenuItem onClick={() => handleNewFile(worktreePath)}>
+									<LuFile className="mr-2 size-4" />
+									New File
+								</ContextMenuItem>
+								<ContextMenuItem onClick={() => handleNewFolder(worktreePath)}>
+									<LuFolder className="mr-2 size-4" />
+									New Folder
+								</ContextMenuItem>
+							</>
+						)}
 					</ContextMenuContent>
 				</ContextMenu>
 			</div>

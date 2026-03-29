@@ -34,9 +34,16 @@ export interface ShellSession {
 	stream: ClientChannel;
 }
 
+const MAX_CONCURRENT_EXEC = 5;
+const MAX_CONCURRENT_SHELL_OPEN = 3;
+
 class SSHConnectionManager extends EventEmitter {
 	private connections = new Map<string, SSHConnectionEntry>();
 	private shells = new Map<string, ShellSession>();
+	private execConcurrency = new Map<string, number>();
+	private execQueues = new Map<string, Array<() => void>>();
+	private shellOpenConcurrency = new Map<string, number>();
+	private shellOpenQueues = new Map<string, Array<() => void>>();
 
 	async connect(config: SSHConnectConfig): Promise<void> {
 		if (this.connections.has(config.serverId)) {
@@ -118,27 +125,82 @@ class SSHConnectionManager extends EventEmitter {
 			throw new Error(`Not connected to server ${serverId}`);
 		}
 
-		return new Promise((resolve, reject) => {
-			entry.client.exec(command, (err, stream) => {
-				if (err) {
-					reject(err);
-					return;
-				}
+		await this.acquireExecSlot(serverId);
+		try {
+			return await new Promise((resolve, reject) => {
+				entry.client.exec(command, (err, stream) => {
+					if (err) {
+						reject(err);
+						return;
+					}
 
-				let stdout = "";
-				let stderr = "";
+					let stdout = "";
+					let stderr = "";
 
-				stream.on("data", (data: Buffer) => {
-					stdout += data.toString();
-				});
-				stream.stderr.on("data", (data: Buffer) => {
-					stderr += data.toString();
-				});
-				stream.on("close", (code: number) => {
-					resolve({ stdout, stderr, code: code ?? 0 });
+					stream.on("data", (data: Buffer) => {
+						stdout += data.toString();
+					});
+					stream.stderr.on("data", (data: Buffer) => {
+						stderr += data.toString();
+					});
+					stream.on("close", (code: number) => {
+						resolve({ stdout, stderr, code: code ?? 0 });
+					});
 				});
 			});
+		} finally {
+			this.releaseExecSlot(serverId);
+		}
+	}
+
+	private acquireExecSlot(serverId: string): Promise<void> {
+		const active = this.execConcurrency.get(serverId) ?? 0;
+		if (active < MAX_CONCURRENT_EXEC) {
+			this.execConcurrency.set(serverId, active + 1);
+			return Promise.resolve();
+		}
+		return new Promise<void>((resolve) => {
+			const queue = this.execQueues.get(serverId) ?? [];
+			queue.push(resolve);
+			this.execQueues.set(serverId, queue);
 		});
+	}
+
+	private releaseExecSlot(serverId: string): void {
+		const queue = this.execQueues.get(serverId);
+		if (queue && queue.length > 0) {
+			const next = queue.shift();
+			if (queue.length === 0) this.execQueues.delete(serverId);
+			next?.();
+		} else {
+			const active = this.execConcurrency.get(serverId) ?? 1;
+			this.execConcurrency.set(serverId, active - 1);
+		}
+	}
+
+	private acquireShellOpenSlot(serverId: string): Promise<void> {
+		const active = this.shellOpenConcurrency.get(serverId) ?? 0;
+		if (active < MAX_CONCURRENT_SHELL_OPEN) {
+			this.shellOpenConcurrency.set(serverId, active + 1);
+			return Promise.resolve();
+		}
+		return new Promise<void>((resolve) => {
+			const queue = this.shellOpenQueues.get(serverId) ?? [];
+			queue.push(resolve);
+			this.shellOpenQueues.set(serverId, queue);
+		});
+	}
+
+	private releaseShellOpenSlot(serverId: string): void {
+		const queue = this.shellOpenQueues.get(serverId);
+		if (queue && queue.length > 0) {
+			const next = queue.shift();
+			if (queue.length === 0) this.shellOpenQueues.delete(serverId);
+			next?.();
+		} else {
+			const active = this.shellOpenConcurrency.get(serverId) ?? 1;
+			this.shellOpenConcurrency.set(serverId, active - 1);
+		}
 	}
 
 	/** Open an interactive PTY shell session, returns session ID */
@@ -151,19 +213,26 @@ class SSHConnectionManager extends EventEmitter {
 			throw new Error(`Not connected to server ${serverId}`);
 		}
 
-		const stream = await new Promise<ClientChannel>((resolve, reject) => {
-			entry.client.shell(
-				{
-					term: "xterm-256color",
-					cols: opts.cols,
-					rows: opts.rows,
-				},
-				(err, s) => {
-					if (err) reject(err);
-					else resolve(s);
-				},
-			);
-		});
+		await this.acquireShellOpenSlot(serverId);
+		const stream = await (async () => {
+			try {
+				return await new Promise<ClientChannel>((resolve, reject) => {
+					entry.client.shell(
+						{
+							term: "xterm-256color",
+							cols: opts.cols,
+							rows: opts.rows,
+						},
+						(err, s) => {
+							if (err) reject(err);
+							else resolve(s);
+						},
+					);
+				});
+			} finally {
+				this.releaseShellOpenSlot(serverId);
+			}
+		})();
 
 		const sessionId = randomUUID();
 		this.shells.set(sessionId, { id: sessionId, serverId, stream });

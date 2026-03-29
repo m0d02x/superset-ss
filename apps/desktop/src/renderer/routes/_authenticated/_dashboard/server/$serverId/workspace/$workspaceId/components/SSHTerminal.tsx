@@ -12,6 +12,8 @@ interface SSHTerminalProps {
 
 export function SSHTerminal({ serverId, cwd }: SSHTerminalProps) {
 	const containerRef = useRef<HTMLDivElement | null>(null);
+	const cleanupRef = useRef<(() => void) | null>(null);
+	const initialCwdRef = useRef(cwd);
 	const [status, setStatus] = useState<"connecting" | "open" | "closed">(
 		"connecting",
 	);
@@ -22,6 +24,30 @@ export function SSHTerminal({ serverId, cwd }: SSHTerminalProps) {
 	const writeShell = electronTrpc.servers.writeShell.useMutation();
 	const resizeShell = electronTrpc.servers.resizeShell.useMutation();
 	const closeShell = electronTrpc.servers.closeShell.useMutation();
+
+	const openShellRef = useRef(openShell.mutate);
+	const writeShellRef = useRef(writeShell.mutate);
+	const resizeShellRef = useRef(resizeShell.mutate);
+	const closeShellRef = useRef(closeShell.mutate);
+
+	useEffect(() => {
+		openShellRef.current = openShell.mutate;
+	}, [openShell.mutate]);
+	useEffect(() => {
+		writeShellRef.current = writeShell.mutate;
+	}, [writeShell.mutate]);
+	useEffect(() => {
+		resizeShellRef.current = resizeShell.mutate;
+	}, [resizeShell.mutate]);
+	useEffect(() => {
+		closeShellRef.current = closeShell.mutate;
+	}, [closeShell.mutate]);
+
+	useEffect(() => {
+		if (!initialCwdRef.current && cwd) {
+			initialCwdRef.current = cwd;
+		}
+	}, [cwd]);
 
 	// Subscribe to shell output
 	electronTrpc.servers.onShellData.useSubscription(
@@ -39,7 +65,6 @@ export function SSHTerminal({ serverId, cwd }: SSHTerminalProps) {
 		},
 	);
 
-	// Open shell and setup xterm
 	useEffect(() => {
 		const container = containerRef.current;
 		if (!container) return;
@@ -64,12 +89,12 @@ export function SSHTerminal({ serverId, cwd }: SSHTerminalProps) {
 		setStatus("connecting");
 
 		// Open PTY shell on server
-		openShell.mutate(
+		openShellRef.current(
 			{
 				serverId,
 				cols: terminal.cols,
 				rows: terminal.rows,
-				cwd,
+				cwd: initialCwdRef.current,
 			},
 			{
 				onSuccess: ({ sessionId: sid }) => {
@@ -78,13 +103,13 @@ export function SSHTerminal({ serverId, cwd }: SSHTerminalProps) {
 
 					// Wire terminal input → shell
 					const onDataDispose = terminal.onData((data) => {
-						writeShell.mutate({ sessionId: sid, data });
+						writeShellRef.current({ sessionId: sid, data });
 					});
 
 					// Wire resize
 					const resizeObserver = new ResizeObserver(() => {
 						fitAddon.fit();
-						resizeShell.mutate({
+						resizeShellRef.current({
 							sessionId: sid,
 							cols: terminal.cols,
 							rows: terminal.rows,
@@ -96,7 +121,7 @@ export function SSHTerminal({ serverId, cwd }: SSHTerminalProps) {
 					cleanupRef.current = () => {
 						onDataDispose.dispose();
 						resizeObserver.disconnect();
-						closeShell.mutate({ sessionId: sid });
+						closeShellRef.current({ sessionId: sid });
 					};
 				},
 				onError: (err) => {
@@ -113,16 +138,7 @@ export function SSHTerminal({ serverId, cwd }: SSHTerminalProps) {
 			terminal.dispose();
 			terminalRef.current = null;
 		};
-	}, [
-		serverId,
-		cwd,
-		closeShell.mutate, // Open PTY shell on server
-		openShell.mutate,
-		resizeShell.mutate,
-		writeShell.mutate,
-	]);
-
-	const cleanupRef = useRef<(() => void) | null>(null);
+	}, [serverId]);
 
 	return (
 		<div className="flex h-full w-full flex-col">
