@@ -80,7 +80,7 @@ export function FileTreeToolbar({
 	}, [onSearchChange]);
 
 	return (
-		<div className="flex flex-col gap-1 px-2 py-1.5 border-b border-border">
+		<div className={`flex flex-col gap-1 px-2 border-b border-border ${hideSearch ? "h-10 justify-center" : "py-1.5"}`}>
 			{!hideSearch && (
 				<div className="relative">
 					<Input

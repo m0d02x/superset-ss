@@ -149,7 +149,7 @@ function ServerWorkspacePage() {
 	return (
 		<div className="flex h-full w-full overflow-hidden">
 			<div className="flex flex-col flex-1 min-w-0 overflow-hidden">
-				<div className="flex shrink-0 items-center border-b border-border bg-muted/30">
+				<div className="flex shrink-0 items-center border-b border-border bg-muted/30 h-10">
 					<div className="flex-1 flex items-center overflow-x-auto hide-scrollbar">
 						{tabs.map((tab) => (
 							<button
