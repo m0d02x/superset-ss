@@ -38,11 +38,28 @@ function WorkspaceIndexPage() {
 			allWorkspaces.find((w) => w.id === lastViewedId) ?? allWorkspaces[0];
 
 		if (targetWorkspace) {
-			navigate({
-				to: "/workspace/$workspaceId",
-				params: { workspaceId: targetWorkspace.id },
-				replace: true,
-			});
+			// Check if this workspace belongs to a remote project
+			const parentGroup = workspaces?.find((g) =>
+				g.workspaces.some((w) => w.id === targetWorkspace.id),
+			);
+			const serverId = parentGroup?.project.serverId;
+
+			if (serverId) {
+				navigate({
+					to: "/server/$serverId/workspace/$workspaceId",
+					params: {
+						serverId,
+						workspaceId: encodeURIComponent(targetWorkspace.worktreePath),
+					},
+					replace: true,
+				});
+			} else {
+				navigate({
+					to: "/workspace/$workspaceId",
+					params: { workspaceId: targetWorkspace.id },
+					replace: true,
+				});
+			}
 		}
 	}, [workspaces, isLoading, navigate, allWorkspaces]);
 

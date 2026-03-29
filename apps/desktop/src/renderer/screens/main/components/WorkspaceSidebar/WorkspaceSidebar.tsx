@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo } from "react";
 import { useWorkspaceShortcuts } from "renderer/hooks/useWorkspaceShortcuts";
+import { DashboardSidebarServerSection } from "renderer/routes/_authenticated/_dashboard/components/DashboardSidebar/components/DashboardSidebarServerSection";
 import { useWorkspaceSelectionStore } from "renderer/stores/workspace-selection";
 import { MultiDragPreview } from "./MultiDragPreview";
 import { PortsList } from "./PortsList";
@@ -88,6 +89,8 @@ export function WorkspaceSidebar({
 						mainRepoPath={group.project.mainRepoPath}
 						hideImage={group.project.hideImage}
 						iconUrl={group.project.iconUrl}
+						serverId={group.project.serverId}
+						remoteRepoPath={group.project.remoteRepoPath}
 						workspaces={group.workspaces}
 						sections={group.sections ?? []}
 						topLevelItems={group.topLevelItems}
@@ -107,6 +110,7 @@ export function WorkspaceSidebar({
 				)}
 			</div>
 
+			{!isCollapsed && <DashboardSidebarServerSection />}
 			{!isCollapsed && <PortsList />}
 
 			<SetupScriptCard

@@ -64,6 +64,15 @@ const externalizedRuntimeModules: ExternalizedRuntimeModule[] = [
 		asarUnpackGlobs: ["**/node_modules/@parcel/watcher*/**/*"],
 	},
 	{
+		specifier: "ssh2",
+		materialize: ["ssh2"],
+		packagedCopies: [copyWholeModule("ssh2"), copyWholeModule("cpu-features")],
+		asarUnpackGlobs: [
+			"**/node_modules/ssh2/**/*",
+			"**/node_modules/cpu-features/**/*",
+		],
+	},
+	{
 		specifier: "libsql",
 		materialize: ["libsql"],
 		packagedCopies: [

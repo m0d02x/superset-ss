@@ -8,6 +8,10 @@ import { projects, workspaces } from "../../../db/schema";
 import { protectedProcedure, router } from "../../index";
 
 export const workspaceRouter = router({
+	list: protectedProcedure.query(({ ctx }) => {
+		return ctx.db.query.workspaces.findMany().sync();
+	}),
+
 	get: protectedProcedure
 		.input(z.object({ id: z.string() }))
 		.query(({ ctx, input }) => {

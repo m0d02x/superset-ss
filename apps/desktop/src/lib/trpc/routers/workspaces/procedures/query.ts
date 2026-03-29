@@ -158,6 +158,8 @@ export const createQueryProcedures = () => {
 						mainRepoPath: string;
 						hideImage: boolean;
 						iconUrl: string | null;
+						serverId: string | null;
+						remoteRepoPath: string | null;
 					};
 					workspaces: WorkspaceItem[];
 					sections: SectionItem[];
@@ -190,6 +192,8 @@ export const createQueryProcedures = () => {
 						mainRepoPath: project.mainRepoPath,
 						hideImage: project.hideImage ?? false,
 						iconUrl: project.iconUrl ?? null,
+						serverId: project.serverId ?? null,
+						remoteRepoPath: project.remoteRepoPath ?? null,
 					},
 					workspaces: [],
 					sections: projectSections,
@@ -211,7 +215,9 @@ export const createQueryProcedures = () => {
 					if (workspace.type === "worktree" && workspace.worktreeId) {
 						worktreePath = worktreePathMap.get(workspace.worktreeId) ?? "";
 					} else if (workspace.type === "branch") {
-						worktreePath = group.project.mainRepoPath;
+						// For remote projects, use the actual remote path, not the synthetic remote:// URI
+						worktreePath =
+							group.project.remoteRepoPath ?? group.project.mainRepoPath;
 					}
 
 					const item: WorkspaceItem = {

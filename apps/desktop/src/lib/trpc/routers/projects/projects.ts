@@ -1729,7 +1729,107 @@ export const createProjectsRouter = (getWindow: () => BrowserWindow | null) => {
 
 				return { iconUrl };
 			}),
+
+		/** Create a project that lives on a remote server (SSH) */
+		createRemoteProject: publicProcedure
+			.input(
+				z.object({
+					serverId: z.string(),
+					remoteRepoPath: z.string().min(1),
+					name: z.string().optional(),
+					defaultBranch: z.string().optional(),
+				}),
+			)
+			.mutation(({ input }) => {
+				const projectName = input.name || basename(input.remoteRepoPath);
+				const branch = input.defaultBranch ?? "main";
+
+				// Check if we already have a remote project for this server + path
+				const existing = localDb
+					.select()
+					.from(projects)
+					.where(
+						and(
+							eq(projects.serverId, input.serverId),
+							eq(projects.remoteRepoPath, input.remoteRepoPath),
+						),
+					)
+					.get();
+
+				if (existing) {
+					activateProject(existing);
+					ensureRemoteMainWorkspace(existing.id, branch, input.remoteRepoPath);
+					return { project: { ...existing, lastOpenedAt: Date.now() } };
+				}
+
+				const project = localDb
+					.insert(projects)
+					.values({
+						mainRepoPath: `remote://${input.serverId}${input.remoteRepoPath}`,
+						name: projectName,
+						color: getDefaultProjectColor(),
+						defaultBranch: branch,
+						serverId: input.serverId,
+						remoteRepoPath: input.remoteRepoPath,
+					})
+					.returning()
+					.get();
+
+				activateProject(project);
+				const ws = ensureRemoteMainWorkspace(
+					project.id,
+					branch,
+					input.remoteRepoPath,
+				);
+				if (ws) setLastActiveWorkspace(ws.id);
+
+				return { project };
+			}),
 	});
 };
+
+/** Create a branch workspace for a remote project if none exists */
+function ensureRemoteMainWorkspace(
+	projectId: string,
+	branch: string,
+	remoteRepoPath: string,
+) {
+	const existing = localDb
+		.select()
+		.from(workspaces)
+		.where(
+			and(eq(workspaces.projectId, projectId), eq(workspaces.type, "branch")),
+		)
+		.get();
+
+	if (existing) return existing;
+
+	// Create a worktree record pointing to the remote path
+	const wt = localDb
+		.insert(worktrees)
+		.values({
+			projectId,
+			path: remoteRepoPath,
+			branch,
+			createdBySuperset: true,
+		})
+		.returning()
+		.get();
+
+	const ws = localDb
+		.insert(workspaces)
+		.values({
+			projectId,
+			worktreeId: wt.id,
+			type: "branch",
+			branch,
+			name: branch,
+			tabOrder: 0,
+		})
+		.returning()
+		.get();
+
+	return ws;
+}
 
 export type ProjectsRouter = ReturnType<typeof createProjectsRouter>;

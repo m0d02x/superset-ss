@@ -9,6 +9,8 @@ import type {
 	FileOpenMode,
 	GitHubStatus,
 	GitStatus,
+	ServerAuthMethod,
+	ServerStatus,
 	TerminalLinkBehavior,
 	TerminalPreset,
 	WorkspaceType,
@@ -46,6 +48,11 @@ export const projects = sqliteTable(
 		iconUrl: text("icon_url"),
 		neonProjectId: text("neon_project_id"),
 		defaultApp: text("default_app").$type<ExternalApp>(),
+		// Remote server project fields
+		serverId: text("server_id").references(() => servers.id, {
+			onDelete: "set null",
+		}),
+		remoteRepoPath: text("remote_repo_path"),
 	},
 	(table) => [
 		index("projects_main_repo_path_idx").on(table.mainRepoPath),
@@ -386,3 +393,42 @@ export const browserHistory = sqliteTable(
 
 export type InsertBrowserHistory = typeof browserHistory.$inferInsert;
 export type SelectBrowserHistory = typeof browserHistory.$inferSelect;
+
+/**
+ * Servers table - remote VPS connections for running host-service
+ */
+export const servers = sqliteTable(
+	"servers",
+	{
+		id: text("id")
+			.primaryKey()
+			.$defaultFn(() => uuidv4()),
+		label: text("label").notNull(),
+		host: text("host").notNull(),
+		port: integer("port").notNull().default(22),
+		username: text("username").notNull().default("root"),
+		authMethod: text("auth_method")
+			.notNull()
+			.$type<ServerAuthMethod>()
+			.default("key"),
+		sshKeyPath: text("ssh_key_path"),
+		hostServicePort: integer("host_service_port").notNull().default(4879),
+		hostServiceSecret: text("host_service_secret"),
+		status: text("status")
+			.notNull()
+			.$type<ServerStatus>()
+			.default("disconnected"),
+		statusMessage: text("status_message"),
+		lastConnectedAt: integer("last_connected_at"),
+		createdAt: integer("created_at")
+			.notNull()
+			.$defaultFn(() => Date.now()),
+		updatedAt: integer("updated_at")
+			.notNull()
+			.$defaultFn(() => Date.now()),
+	},
+	(table) => [index("servers_host_idx").on(table.host)],
+);
+
+export type InsertServer = typeof servers.$inferInsert;
+export type SelectServer = typeof servers.$inferSelect;

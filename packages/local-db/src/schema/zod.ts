@@ -242,3 +242,22 @@ export type BranchPrefixMode = (typeof BRANCH_PREFIX_MODES)[number];
 export const FILE_OPEN_MODES = ["split-pane", "new-tab"] as const;
 
 export type FileOpenMode = (typeof FILE_OPEN_MODES)[number];
+
+/**
+ * Server auth methods for remote VPS connections
+ */
+export const SERVER_AUTH_METHODS = ["key", "password", "agent"] as const;
+
+export type ServerAuthMethod = (typeof SERVER_AUTH_METHODS)[number];
+
+/**
+ * Server connection status
+ */
+export const SERVER_STATUSES = [
+	"disconnected",
+	"connecting",
+	"connected",
+	"error",
+] as const;
+
+export type ServerStatus = (typeof SERVER_STATUSES)[number];

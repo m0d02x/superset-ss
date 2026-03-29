@@ -1,10 +1,20 @@
 import { relations } from "drizzle-orm";
-import { projects, workspaceSections, workspaces, worktrees } from "./schema";
+import {
+	projects,
+	servers,
+	workspaceSections,
+	workspaces,
+	worktrees,
+} from "./schema";
 
-export const projectsRelations = relations(projects, ({ many }) => ({
+export const projectsRelations = relations(projects, ({ one, many }) => ({
 	worktrees: many(worktrees),
 	workspaces: many(workspaces),
 	workspaceSections: many(workspaceSections),
+	server: one(servers, {
+		fields: [projects.serverId],
+		references: [servers.id],
+	}),
 }));
 
 export const worktreesRelations = relations(worktrees, ({ one, many }) => ({

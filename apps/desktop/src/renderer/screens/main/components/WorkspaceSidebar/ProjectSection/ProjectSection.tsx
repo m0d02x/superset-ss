@@ -1,5 +1,6 @@
 import { toast } from "@superset/ui/sonner";
 import { cn } from "@superset/ui/utils";
+import { useNavigate } from "@tanstack/react-router";
 import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useMemo, useRef } from "react";
 import { useDrag, useDrop } from "react-dnd";
@@ -37,6 +38,8 @@ interface ProjectSectionProps {
 	mainRepoPath: string;
 	hideImage: boolean;
 	iconUrl: string | null;
+	serverId?: string | null;
+	remoteRepoPath?: string | null;
 	workspaces: SidebarWorkspace[];
 	sections: SidebarSection[];
 	topLevelItems: {
@@ -60,6 +63,8 @@ export function ProjectSection({
 	mainRepoPath,
 	hideImage,
 	iconUrl,
+	serverId,
+	remoteRepoPath,
 	workspaces,
 	sections,
 	topLevelItems,
@@ -67,6 +72,8 @@ export function ProjectSection({
 	index,
 	isCollapsed: isSidebarCollapsed = false,
 }: ProjectSectionProps) {
+	const navigate = useNavigate();
+	const isRemote = !!serverId && !!remoteRepoPath;
 	const { isProjectCollapsed, toggleProjectCollapsed } =
 		useWorkspaceSidebarStore();
 	const openModal = useOpenNewWorkspaceModal();
@@ -152,7 +159,23 @@ export function ProjectSection({
 		);
 
 	const handleNewWorkspace = () => {
+		if (isRemote && serverId) {
+			navigate({
+				to: "/server/$serverId",
+				params: { serverId },
+			});
+			return;
+		}
 		openModal(projectId);
+	};
+
+	const _handleOpenRemoteProject = () => {
+		if (serverId) {
+			navigate({
+				to: "/server/$serverId",
+				params: { serverId },
+			});
+		}
 	};
 
 	const [{ isDragging }, drag] = useDrag(
@@ -288,6 +311,7 @@ export function ProjectSection({
 											sectionId={null}
 											sections={sections}
 											orderedWorkspaceIds={orderedWorkspaceIds}
+											serverId={serverId}
 										/>
 									) : (
 										<WorkspaceSection
@@ -303,6 +327,7 @@ export function ProjectSection({
 											isSidebarCollapsed
 											allSections={sections}
 											orderedWorkspaceIds={orderedWorkspaceIds}
+											serverId={serverId}
 										/>
 									),
 								)}
@@ -362,18 +387,20 @@ export function ProjectSection({
 						className="overflow-hidden"
 					>
 						<div className="pb-1">
-							{showRootDropZones && topLevelChildren.length === 0 && (
-								<div
-									{...topUngroupedDropZone.handlers}
-									className={cn(
-										"transition-colors rounded-sm min-h-8",
-										getRootDropZoneClassName(
-											topUngroupedDropZone.isDropTarget,
-											topUngroupedDropZone.isDragOver,
-										),
-									)}
-								/>
-							)}
+							{showRootDropZones &&
+								!isRemote &&
+								topLevelChildren.length === 0 && (
+									<div
+										{...topUngroupedDropZone.handlers}
+										className={cn(
+											"transition-colors rounded-sm min-h-8",
+											getRootDropZoneClassName(
+												topUngroupedDropZone.isDropTarget,
+												topUngroupedDropZone.isDragOver,
+											),
+										)}
+									/>
+								)}
 							{showRootDropZones && topLevelChildren.length > 0 && (
 								<div
 									{...topUngroupedDropZone.handlers}
@@ -402,6 +429,7 @@ export function ProjectSection({
 										sectionId={null}
 										sections={sections}
 										orderedWorkspaceIds={orderedWorkspaceIds}
+										serverId={serverId}
 									/>
 								) : (
 									<WorkspaceSection
@@ -416,6 +444,7 @@ export function ProjectSection({
 										shortcutBaseIndex={item.shortcutBaseIndex}
 										allSections={sections}
 										orderedWorkspaceIds={orderedWorkspaceIds}
+										serverId={serverId}
 									/>
 								),
 							)}

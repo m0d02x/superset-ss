@@ -46,6 +46,7 @@ interface WorkspaceListItemProps {
 	sectionId?: string | null;
 	sections?: { id: string; name: string }[];
 	orderedWorkspaceIds?: string[];
+	serverId?: string | null;
 }
 
 export function WorkspaceListItem({
@@ -62,6 +63,7 @@ export function WorkspaceListItem({
 	sectionId = null,
 	sections = [],
 	orderedWorkspaceIds = [],
+	serverId,
 }: WorkspaceListItemProps) {
 	const isBranchWorkspace = type === "branch";
 	const navigate = useNavigate();
@@ -222,7 +224,19 @@ export function WorkspaceListItem({
 		selectionStore.getState().clearSelection();
 		selectionStore.setState({ lastClickedId: id });
 		clearWorkspaceAttentionStatus(id);
-		navigateToWorkspace(id, navigate);
+
+		if (serverId) {
+			localStorage.setItem("lastViewedWorkspaceId", id);
+			void navigate({
+				to: "/server/$serverId/workspace/$workspaceId",
+				params: {
+					serverId,
+					workspaceId: worktreePath,
+				},
+			});
+		} else {
+			navigateToWorkspace(id, navigate);
+		}
 	};
 
 	const handleMouseEnter = () => {

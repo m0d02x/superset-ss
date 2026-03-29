@@ -26,6 +26,10 @@ export function getWorkspacePath(workspace: SelectWorkspace): string | null {
 			.from(projects)
 			.where(eq(projects.id, workspace.projectId))
 			.get();
+		// For remote projects, use the actual remote path, not the synthetic remote:// URI
+		if (project?.remoteRepoPath) {
+			return project.remoteRepoPath;
+		}
 		return project?.mainRepoPath ?? null;
 	}
 

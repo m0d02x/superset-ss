@@ -39,6 +39,7 @@ interface WorkspaceSectionProps {
 	isSidebarCollapsed?: boolean;
 	allSections?: { id: string; name: string }[];
 	orderedWorkspaceIds?: string[];
+	serverId?: string | null;
 }
 
 export function WorkspaceSection({
@@ -53,6 +54,7 @@ export function WorkspaceSection({
 	isSidebarCollapsed = false,
 	allSections = [],
 	orderedWorkspaceIds,
+	serverId: _serverId,
 }: WorkspaceSectionProps) {
 	const utils = electronTrpc.useUtils();
 	const [isRenaming, setIsRenaming] = useState(false);

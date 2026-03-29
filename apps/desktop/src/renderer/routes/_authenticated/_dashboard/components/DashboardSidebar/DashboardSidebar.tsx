@@ -1,5 +1,6 @@
 import { DashboardSidebarHeader } from "./components/DashboardSidebarHeader";
 import { DashboardSidebarProjectSection } from "./components/DashboardSidebarProjectSection";
+import { DashboardSidebarServerSection } from "./components/DashboardSidebarServerSection";
 import { useDashboardSidebarData } from "./hooks/useDashboardSidebarData";
 import { useDashboardSidebarShortcuts } from "./hooks/useDashboardSidebarShortcuts";
 
@@ -29,6 +30,8 @@ export function DashboardSidebar({
 						onToggleCollapse={toggleProjectCollapsed}
 					/>
 				))}
+
+				<DashboardSidebarServerSection />
 			</div>
 		</div>
 	);

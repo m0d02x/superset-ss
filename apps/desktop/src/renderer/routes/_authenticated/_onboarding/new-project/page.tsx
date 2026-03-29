@@ -7,12 +7,14 @@ import {
 	LuFolderPlus,
 	LuGitBranch,
 	LuLayoutTemplate,
+	LuServer,
 	LuX,
 } from "react-icons/lu";
 import { electronTrpc } from "renderer/lib/electron-trpc";
 import { CloneRepoTab } from "./components/CloneRepoTab";
 import { EmptyRepoTab } from "./components/EmptyRepoTab";
 import { PathSelector } from "./components/PathSelector";
+import { RemoteServerTab } from "./components/RemoteServerTab";
 import { TemplateTab } from "./components/TemplateTab";
 import type { NewProjectMode } from "./constants";
 
@@ -46,6 +48,12 @@ const OPTIONS: {
 		description: "Start from a project template",
 		icon: LuLayoutTemplate,
 	},
+	{
+		mode: "remote",
+		label: "Remote",
+		description: "Clone on a remote server",
+		icon: LuServer,
+	},
 ];
 
 function NewProjectPage() {
@@ -78,7 +86,7 @@ function NewProjectPage() {
 
 						<PathSelector value={parentDir} onChange={setParentDir} />
 
-						<div className="grid grid-cols-3 gap-3">
+						<div className="grid grid-cols-4 gap-3">
 							{OPTIONS.map((option) => {
 								const selected = mode === option.mode;
 								return (
@@ -124,6 +132,7 @@ function NewProjectPage() {
 						{mode === "template" && (
 							<TemplateTab onError={setError} parentDir={parentDir} />
 						)}
+						{mode === "remote" && <RemoteServerTab onError={setError} />}
 
 						{error && (
 							<div className="w-full flex items-start gap-2 rounded-md px-4 py-3 bg-destructive/10 border border-destructive/20">

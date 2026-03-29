@@ -53,6 +53,10 @@ function getSelectedLabel(
 		return "Cloud Workspace";
 	}
 
+	if (hostTarget.kind === "server") {
+		return "Remote Server";
+	}
+
 	return (
 		otherDevices.find((device) => device.id === hostTarget.deviceId)?.name ??
 		"Unknown Device"

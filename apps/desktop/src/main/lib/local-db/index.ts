@@ -103,4 +103,14 @@ try {
 
 console.log("[local-db] Migrations complete");
 
+// Reset all server statuses to disconnected on startup
+// (SSH connections are in-memory and don't survive restarts)
+try {
+	sqlite.exec(
+		"UPDATE servers SET status = 'disconnected', status_message = NULL WHERE status != 'disconnected'",
+	);
+} catch {
+	// Table may not exist yet on first run
+}
+
 export type LocalDb = typeof localDb;
