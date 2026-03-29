@@ -39,6 +39,15 @@ export const createWindowRouter = (getWindow: () => BrowserWindow | null) => {
 			return window.isMaximized();
 		}),
 
+		setTrafficLightsVisible: publicProcedure
+			.input(z.object({ visible: z.boolean() }))
+			.mutation(({ input }) => {
+				const window = getWindow();
+				if (!window) return { success: false };
+				window.setWindowButtonVisibility(input.visible);
+				return { success: true };
+			}),
+
 		getPlatform: publicProcedure.query(() => {
 			return process.platform;
 		}),
