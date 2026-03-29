@@ -7,6 +7,7 @@ import { electronTrpc } from "renderer/lib/electron-trpc";
 import { useAppHotkey } from "renderer/stores/hotkeys";
 import { useServersStore } from "renderer/stores/servers-state";
 import { SSHTerminal } from "./components/SSHTerminal";
+import { RemoteFileViewer } from "./workspace/$workspaceId/components/RemoteFileViewer";
 import { ServerWorkspaceSidebar } from "./workspace/$workspaceId/components/ServerWorkspaceSidebar";
 
 interface ServerSearchParams {
@@ -33,14 +34,20 @@ function ServerPage() {
 		{ refetchInterval: 2000 },
 	);
 
+	const { data: spaces = [] } = electronTrpc.servers.listSpaces.useQuery(
+		{ serverId },
+		{ refetchOnWindowFocus: false },
+	);
+
 	const {
-		serverSpaces,
+		spaceTerminals,
 		addTerminalToSpace,
 		removeTerminalFromSpace,
 		setSelectedServer,
 		setSelectedSpace,
 		terminalCwds,
 		setTerminalCwd,
+		setTerminalLabel,
 	} = useServersStore();
 
 	useEffect(() => {
@@ -50,24 +57,14 @@ function ServerPage() {
 		};
 	}, [setSelectedSpace, spaceId]);
 
-	const tabs = useMemo(() => {
-		const spaces = serverSpaces[serverId] || [];
-		const activeSpace = spaces.find(
-			(candidateSpace) => candidateSpace.id === spaceId,
-		);
-		return activeSpace?.terminals || [];
-	}, [serverId, serverSpaces, spaceId]);
-
-	const allSpaces = useMemo(() => {
-		return serverSpaces[serverId] || [];
-	}, [serverId, serverSpaces]);
-
 	const activeSpace = useMemo(() => {
-		const spaces = serverSpaces[serverId] || [];
-		return (
-			spaces.find((candidateSpace) => candidateSpace.id === spaceId) || null
-		);
-	}, [serverId, serverSpaces, spaceId]);
+		return spaces.find((s) => s.id === spaceId) || null;
+	}, [spaces, spaceId]);
+
+	const tabs = useMemo(() => {
+		if (!spaceId) return [];
+		return spaceTerminals[spaceId] || [];
+	}, [spaceId, spaceTerminals]);
 
 	const activeTabId = useMemo(() => {
 		if (tabParam && tabs.some((t) => t.id === tabParam)) {
@@ -90,7 +87,7 @@ function ServerPage() {
 			activeSpace.directory ||
 			(activeTabId ? terminalCwds[activeTabId] : undefined);
 
-		const terminal = addTerminalToSpace(serverId, spaceId);
+		const terminal = addTerminalToSpace(spaceId);
 		if (inheritedCwd) {
 			setTerminalCwd(terminal.id, inheritedCwd);
 		}
@@ -102,7 +99,6 @@ function ServerPage() {
 		activeTabId,
 		addTerminalToSpace,
 		navigate,
-		serverId,
 		setTerminalCwd,
 		spaceId,
 		terminalCwds,
@@ -113,6 +109,7 @@ function ServerPage() {
 	const [activatedTerminalIds, setActivatedTerminalIds] = useState<Set<string>>(
 		() => new Set(),
 	);
+	const [openFilePath, setOpenFilePath] = useState<string | null>(null);
 
 	const handleResizeMouseDown = useCallback(
 		(e: React.MouseEvent) => {
@@ -133,7 +130,9 @@ function ServerPage() {
 		[sidebarWidth],
 	);
 
-	const handleFileSelect = useCallback((_filePath: string) => {}, []);
+	const handleFileSelect = useCallback((filePath: string) => {
+		setOpenFilePath(filePath);
+	}, []);
 
 	useEffect(() => {
 		if (!activeTabId) {
@@ -151,22 +150,14 @@ function ServerPage() {
 		});
 	}, [activeTabId]);
 
-	useAppHotkey(
-		"NEW_GROUP",
-		() => {
-			handleAddTerminal();
-		},
-		{ preventDefault: true },
-	);
-
 	const handleCloseTab = useCallback(
 		(terminalId: string) => {
-			if (!spaceId || !activeSpace) {
+			if (!spaceId) {
 				return;
 			}
 
 			const wasActive = activeTabId === terminalId;
-			removeTerminalFromSpace(serverId, spaceId, terminalId);
+			removeTerminalFromSpace(spaceId, terminalId);
 
 			if (wasActive) {
 				const remainingTabs = tabs.filter((t) => t.id !== terminalId);
@@ -188,15 +179,33 @@ function ServerPage() {
 				return next;
 			});
 		},
-		[
-			activeTabId,
-			activeSpace,
-			removeTerminalFromSpace,
-			navigate,
-			serverId,
-			spaceId,
-			tabs,
-		],
+		[activeTabId, removeTerminalFromSpace, navigate, spaceId, tabs],
+	);
+
+	useAppHotkey(
+		"NEW_GROUP",
+		() => {
+			handleAddTerminal();
+		},
+		{ preventDefault: true },
+	);
+	useAppHotkey(
+		"CLOSE_TERMINAL",
+		() => {
+			if (activeTabId) {
+				handleCloseTab(activeTabId);
+			}
+		},
+		{ preventDefault: true },
+		[activeTabId, handleCloseTab],
+	);
+	useAppHotkey(
+		"TOGGLE_SIDEBAR",
+		() => {
+			setIsSidebarOpen((v) => !v);
+		},
+		{ preventDefault: true },
+		[setIsSidebarOpen],
 	);
 
 	if (!server) {
@@ -239,13 +248,13 @@ function ServerPage() {
 	return (
 		<div className="flex h-full w-full overflow-hidden">
 			<div className="flex flex-1 min-w-0 flex-col overflow-hidden">
-				<div className="flex shrink-0 items-center border-b border-border bg-muted/30">
-					<div className="flex flex-1 items-center overflow-x-auto hide-scrollbar">
+				<div className="flex shrink-0 items-center border-b border-border bg-muted/30 h-10">
+					<div className="flex h-full flex-1 items-center overflow-x-auto hide-scrollbar">
 						{tabs.map((tab) => (
 							<button
 								key={tab.id}
 								type="button"
-								className={`group flex shrink-0 items-center gap-1.5 border-r border-border px-3 py-1.5 text-xs transition-colors ${
+								className={`group flex h-full shrink-0 items-center gap-1.5 border-r border-border px-3 text-xs transition-colors ${
 									activeTabId === tab.id
 										? "bg-background text-foreground"
 										: "text-muted-foreground hover:bg-background/50 hover:text-foreground"
@@ -254,7 +263,7 @@ function ServerPage() {
 									navigate({ search: { space: spaceId, tab: tab.id } });
 								}}
 							>
-								<span className="max-w-32 truncate">{tab.label}</span>
+								<span className="max-w-48 truncate">{tab.label}</span>
 								<button
 									type="button"
 									className="rounded p-0.5 opacity-0 transition-opacity hover:bg-muted group-hover:opacity-100"
@@ -299,31 +308,53 @@ function ServerPage() {
 					</div>
 				</div>
 
-				<div className="relative flex-1">
-					{allSpaces.flatMap((space) =>
-						space.terminals.map((terminal) => {
-							const isVisible =
-								space.id === spaceId && terminal.id === activeTabId;
-							if (!activatedTerminalIds.has(terminal.id)) {
-								return null;
-							}
+				<div className="flex flex-1 min-h-0">
+				<div className="relative flex-1 min-w-0">
+					{tabs.map((terminal) => {
+						const isVisible = terminal.id === activeTabId;
+						if (!activatedTerminalIds.has(terminal.id)) {
+							return null;
+						}
 
-							return (
-								<div
-									key={terminal.id}
-									className={`absolute inset-0 ${isVisible ? "" : "invisible pointer-events-none"}`}
-								>
-									<SSHTerminal
-										serverId={serverId}
-										terminalId={terminal.id}
-										cwd={terminalCwds[terminal.id]}
-										onCwdChange={(cwd) => setTerminalCwd(terminal.id, cwd)}
-									/>
-								</div>
-							);
-						}),
-					)}
+						return (
+							<div
+								key={terminal.id}
+								className={`absolute inset-0 ${isVisible ? "" : "invisible pointer-events-none"}`}
+							>
+								<SSHTerminal
+									serverId={serverId}
+									terminalId={terminal.id}
+									cwd={terminalCwds[terminal.id]}
+									onCwdChange={(cwd) => {
+										setTerminalCwd(terminal.id, cwd);
+										if (spaceId) {
+											const dirName = cwd.split("/").filter(Boolean).pop();
+											if (dirName) {
+												setTerminalLabel(spaceId, terminal.id, dirName);
+											}
+										}
+									}}
+									onTitleChange={(title) => {
+										if (spaceId && title) {
+											setTerminalLabel(spaceId, terminal.id, title);
+										}
+									}}
+								/>
+							</div>
+						);
+					})}
 				</div>
+
+				{openFilePath && (
+					<div className="shrink-0 border-l border-border flex flex-col" style={{ width: "50%" }}>
+						<RemoteFileViewer
+							serverId={serverId}
+							filePath={openFilePath}
+							onClose={() => setOpenFilePath(null)}
+						/>
+					</div>
+				)}
+			</div>
 			</div>
 
 			{isSidebarOpen && (
@@ -342,7 +373,7 @@ function ServerPage() {
 					/>
 					<ServerWorkspaceSidebar
 						serverId={serverId}
-						rootPath={activeSpace.directory}
+						rootPath={activeSpace.directory ?? undefined}
 						onFileSelect={handleFileSelect}
 					/>
 				</div>

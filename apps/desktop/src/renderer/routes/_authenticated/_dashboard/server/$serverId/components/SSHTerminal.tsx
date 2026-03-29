@@ -10,6 +10,7 @@ interface SSHTerminalProps {
 	terminalId: string;
 	cwd?: string;
 	onCwdChange?: (cwd: string) => void;
+	onTitleChange?: (title: string) => void;
 }
 
 const ESC = "\x1b";
@@ -41,6 +42,7 @@ export function SSHTerminal({
 	terminalId,
 	cwd,
 	onCwdChange,
+	onTitleChange,
 }: SSHTerminalProps) {
 	const containerRef = useRef<HTMLDivElement | null>(null);
 	const cleanupRef = useRef<(() => void) | null>(null);
@@ -50,6 +52,7 @@ export function SSHTerminal({
 		"connecting",
 	);
 	const [sessionId, setSessionId] = useState<string | null>(null);
+	const [mountKey, setMountKey] = useState(0);
 	const terminalRef = useRef<XTerm | null>(null);
 
 	const openShell = electronTrpc.servers.openShell.useMutation();
@@ -61,6 +64,7 @@ export function SSHTerminal({
 	const resizeShellRef = useRef(resizeShell.mutate);
 	const closeShellRef = useRef(closeShell.mutate);
 	const onCwdChangeRef = useRef(onCwdChange);
+	const onTitleChangeRef = useRef(onTitleChange);
 
 	useEffect(() => {
 		openShellRef.current = openShell.mutate;
@@ -81,6 +85,10 @@ export function SSHTerminal({
 	useEffect(() => {
 		onCwdChangeRef.current = onCwdChange;
 	}, [onCwdChange]);
+
+	useEffect(() => {
+		onTitleChangeRef.current = onTitleChange;
+	}, [onTitleChange]);
 
 	useEffect(() => {
 		if (!initialCwdRef.current && cwd) {
@@ -117,6 +125,8 @@ export function SSHTerminal({
 		const container = containerRef.current;
 		if (!container) return;
 
+		let cancelled = false;
+
 		const fitAddon = new FitAddon();
 		const terminal = new XTerm({
 			cursorBlink: true,
@@ -136,61 +146,92 @@ export function SSHTerminal({
 
 		setStatus("connecting");
 
-		// Open PTY shell on server
-		openShellRef.current(
-			{
-				serverId,
-				cols: terminal.cols,
-				rows: terminal.rows,
-				cwd: initialCwdRef.current,
-			},
-			{
-				onSuccess: ({ sessionId: sid }) => {
-					setSessionId(sid);
-					setStatus("open");
+		const MAX_RETRIES = 3;
+		const RETRY_DELAY_MS = 800;
 
-					// Wire terminal input → shell
-					const onDataDispose = terminal.onData((data) => {
-						writeShellRef.current({ sessionId: sid, data });
-					});
+		function attemptOpenShell(attempt: number) {
+			if (cancelled) return;
 
-					// Wire resize
-					const resizeObserver = new ResizeObserver(() => {
-						fitAddon.fit();
-						resizeShellRef.current({
-							sessionId: sid,
-							cols: terminal.cols,
-							rows: terminal.rows,
+			openShellRef.current(
+				{
+					serverId,
+					cols: terminal.cols,
+					rows: terminal.rows,
+					cwd: initialCwdRef.current,
+				},
+				{
+					onSuccess: ({ sessionId: sid }) => {
+						if (cancelled) {
+							closeShellRef.current({ sessionId: sid });
+							return;
+						}
+						setSessionId(sid);
+						setStatus("open");
+
+						// Wire terminal input → shell
+						const onDataDispose = terminal.onData((data) => {
+							writeShellRef.current({ sessionId: sid, data });
 						});
-					});
-					resizeObserver.observe(container);
 
-					// Cleanup on unmount stored in ref
-					cleanupRef.current = () => {
-						onDataDispose.dispose();
-						resizeObserver.disconnect();
-						closeShellRef.current({ sessionId: sid });
-					};
+						// Wire terminal title changes (OSC 0/1/2 from shell)
+						const onTitleDispose = terminal.onTitleChange((title) => {
+							onTitleChangeRef.current?.(title);
+						});
+
+						// Wire resize
+						const resizeObserver = new ResizeObserver(() => {
+							fitAddon.fit();
+							resizeShellRef.current({
+								sessionId: sid,
+								cols: terminal.cols,
+								rows: terminal.rows,
+							});
+						});
+						resizeObserver.observe(container);
+
+						// Cleanup on unmount stored in ref
+						cleanupRef.current = () => {
+							onDataDispose.dispose();
+							onTitleDispose.dispose();
+							resizeObserver.disconnect();
+							closeShellRef.current({ sessionId: sid });
+						};
+					},
+					onError: (err) => {
+						if (cancelled) return;
+
+						if (
+							attempt < MAX_RETRIES &&
+							err.message.includes("Channel open failure")
+						) {
+							terminal.writeln(
+								`\r\n\x1b[33mChannel busy, retrying (${attempt}/${MAX_RETRIES})...\x1b[0m`,
+							);
+							setTimeout(() => attemptOpenShell(attempt + 1), RETRY_DELAY_MS);
+						} else {
+							terminal.writeln(
+								`\r\n\x1b[31mFailed to open shell: ${err.message}\x1b[0m`,
+							);
+							setStatus("closed");
+						}
+					},
 				},
-				onError: (err) => {
-					terminal.writeln(
-						`\r\n\x1b[31mFailed to open shell: ${err.message}\x1b[0m`,
-					);
-					setStatus("closed");
-				},
-			},
-		);
+			);
+		}
+
+		attemptOpenShell(1);
 
 		return () => {
+			cancelled = true;
 			cleanupRef.current?.();
 			terminal.dispose();
 			terminalRef.current = null;
 		};
-	}, [serverId]);
+	}, [serverId, mountKey]);
 
 	return (
 		<div className="flex h-full w-full flex-col">
-			<div className="flex items-center gap-2 border-b border-border px-3 py-1.5">
+			<div className="flex items-center gap-2 border-b border-border px-3 h-10 shrink-0">
 				<span className="text-xs text-muted-foreground">
 					{status === "open"
 						? "SSH Shell"
@@ -209,12 +250,10 @@ export function SSHTerminal({
 					className="ml-auto h-6 text-xs"
 					onClick={() => {
 						cleanupRef.current?.();
+						cleanupRef.current = null;
 						setSessionId(null);
 						setStatus("connecting");
-						// Force re-mount by clearing container
-						if (containerRef.current) {
-							containerRef.current.innerHTML = "";
-						}
+						setMountKey((k) => k + 1);
 					}}
 				>
 					Reconnect

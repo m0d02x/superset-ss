@@ -16,22 +16,20 @@ function ServerGroup({ server }: ServerGroupProps) {
 	const utils = electronTrpc.useUtils();
 
 	const {
-		addSpace,
-		removeSpace,
-		setSpaceDirectory,
-		renameSpace,
 		toggleServerCollapsed,
 		isServerCollapsed,
-		ensureDefaultSpace,
 		setSelectedServer,
 		setSelectedSpace,
 		selectedSpaceId,
 	} = useServersStore();
 
 	const isCollapsed = isServerCollapsed(server.id);
-	const spaces = useServersStore(
-		(state) => state.serverSpaces[server.id] || [],
+
+	const { data: spaces = [] } = electronTrpc.servers.listSpaces.useQuery(
+		{ serverId: server.id },
+		{ refetchOnWindowFocus: false },
 	);
+
 	const spaceCount = spaces.length || 1;
 
 	const connectMutation = electronTrpc.servers.connect.useMutation({
@@ -58,6 +56,24 @@ function ServerGroup({ server }: ServerGroupProps) {
 		},
 	});
 
+	const createSpaceMutation = electronTrpc.servers.createSpace.useMutation({
+		onSuccess: () => {
+			utils.servers.listSpaces.invalidate({ serverId: server.id });
+		},
+	});
+
+	const deleteSpaceMutation = electronTrpc.servers.deleteSpace.useMutation({
+		onSuccess: () => {
+			utils.servers.listSpaces.invalidate({ serverId: server.id });
+		},
+	});
+
+	const updateSpaceMutation = electronTrpc.servers.updateSpace.useMutation({
+		onSuccess: () => {
+			utils.servers.listSpaces.invalidate({ serverId: server.id });
+		},
+	});
+
 	const isConnecting =
 		server.status === "connecting" || connectMutation.isPending;
 
@@ -68,16 +84,22 @@ function ServerGroup({ server }: ServerGroupProps) {
 	};
 
 	const handleAddSpace = () => {
-		const space = addSpace(server.id);
-		setSelectedServer(server.id);
-		setSelectedSpace(space.id);
-		autoConnect();
+		createSpaceMutation.mutate(
+			{ serverId: server.id, label: `Space ${spaces.length + 1}` },
+			{
+				onSuccess: (space) => {
+					setSelectedServer(server.id);
+					setSelectedSpace(space.id);
+					autoConnect();
 
-		navigate({
-			to: "/server/$serverId",
-			params: { serverId: server.id },
-			search: { space: space.id },
-		});
+					navigate({
+						to: "/server/$serverId",
+						params: { serverId: server.id },
+						search: { space: space.id },
+					});
+				},
+			},
+		);
 	};
 
 	const handleSpaceSelect = (spaceId: string) => {
@@ -96,7 +118,7 @@ function ServerGroup({ server }: ServerGroupProps) {
 		const fallbackSpaceId = nextSpaces[0]?.id;
 		const wasActive = selectedSpaceId === spaceId;
 
-		removeSpace(server.id, spaceId);
+		deleteSpaceMutation.mutate({ id: spaceId });
 
 		if (wasActive) {
 			setSelectedServer(server.id);
@@ -114,11 +136,13 @@ function ServerGroup({ server }: ServerGroupProps) {
 		spaceId: string,
 		directory: string | undefined,
 	) => {
-		setSpaceDirectory(server.id, spaceId, directory);
+		updateSpaceMutation.mutate({ id: spaceId, directory: directory ?? null });
 	};
 
 	const handleSpaceRename = (spaceId: string, label: string) => {
-		renameSpace(server.id, spaceId, label);
+		const trimmed = label.trim();
+		if (!trimmed) return;
+		updateSpaceMutation.mutate({ id: spaceId, label: trimmed });
 	};
 
 	const handleToggleCollapse = () => {
@@ -136,10 +160,6 @@ function ServerGroup({ server }: ServerGroupProps) {
 	const handleDelete = () => {
 		deleteMutation.mutate({ id: server.id });
 	};
-
-	useEffect(() => {
-		ensureDefaultSpace(server.id);
-	}, [server.id, ensureDefaultSpace]);
 
 	return (
 		<div className="border-b border-border last:border-b-0">
@@ -171,7 +191,7 @@ function ServerGroup({ server }: ServerGroupProps) {
 									serverId={server.id}
 									spaceId={space.id}
 									label={space.label}
-									directory={space.directory}
+									directory={space.directory ?? undefined}
 									isActive={selectedSpaceId === space.id}
 									onSelect={() => handleSpaceSelect(space.id)}
 									onClose={() => handleSpaceClose(space.id)}
@@ -208,31 +228,16 @@ export function DashboardSidebarServerSection() {
 		useServersStore();
 
 	return (
-		<div className="border-t border-border">
+		<div>
 			{servers.length === 0 ? (
-				<div className="px-1 py-1">
-					<button
-						type="button"
-						className="w-full px-3 py-2 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded transition-colors text-left"
-						onClick={openAddServerDialog}
-					>
-						Add a server...
-					</button>
+				<div className="flex flex-col items-center justify-center h-32 text-muted-foreground text-sm">
+					<span>No servers yet</span>
 				</div>
 			) : (
 				<div className="py-0">
 					{servers.map((server) => (
 						<ServerGroup key={server.id} server={server} />
 					))}
-					<div className="px-1 py-1">
-						<button
-							type="button"
-							className="w-full px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded transition-colors text-left"
-							onClick={openAddServerDialog}
-						>
-							Add a server...
-						</button>
-					</div>
 				</div>
 			)}
 
