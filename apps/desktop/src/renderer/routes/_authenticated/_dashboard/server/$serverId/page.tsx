@@ -6,8 +6,22 @@ import { LuPanelRight } from "react-icons/lu";
 import { electronTrpc } from "renderer/lib/electron-trpc";
 import { useAppHotkey } from "renderer/stores/hotkeys";
 import { useServersStore } from "renderer/stores/servers-state";
+import { GhosttySSHTerminal } from "./components/GhosttySSHTerminal";
 import { SSHTerminal } from "./components/SSHTerminal";
 import { RemoteFileViewer } from "./workspace/$workspaceId/components/RemoteFileViewer";
+
+/**
+ * Dev toggle: set localStorage.setItem('USE_GHOSTTY', '1') to use ghostty-web
+ * instead of xterm.js for SSH terminals.
+ */
+function useGhosttyEnabled(): boolean {
+	// Disabled: ghostty-web 0.4.0 crashes (WASM unreachable trap) on macOS
+	// space/tab switches because its internal requestAnimationFrame render loop
+	// calls into WASM while the canvas is in an invalid state. Re-enable once
+	// ghostty-web handles visibility changes gracefully.
+	return false;
+}
+
 import { ServerWorkspaceSidebar } from "./workspace/$workspaceId/components/ServerWorkspaceSidebar";
 
 interface ServerSearchParams {
@@ -45,6 +59,8 @@ function ServerPage() {
 		removeTerminalFromSpace,
 		setSelectedServer,
 		setSelectedSpace,
+		getSelectedTerminalForSpace,
+		setSelectedTerminalForSpace,
 		terminalCwds,
 		setTerminalCwd,
 		setTerminalLabel,
@@ -67,11 +83,27 @@ function ServerPage() {
 	}, [spaceId, spaceTerminals]);
 
 	const activeTabId = useMemo(() => {
+		if (!spaceId) return null;
+
 		if (tabParam && tabs.some((t) => t.id === tabParam)) {
 			return tabParam;
 		}
+
+		const rememberedTabId = getSelectedTerminalForSpace(spaceId);
+		if (rememberedTabId && tabs.some((t) => t.id === rememberedTabId)) {
+			return rememberedTabId;
+		}
+
 		return tabs[0]?.id || null;
-	}, [tabParam, tabs]);
+	}, [getSelectedTerminalForSpace, spaceId, tabParam, tabs]);
+
+	useEffect(() => {
+		if (!spaceId) {
+			return;
+		}
+
+		setSelectedTerminalForSpace(spaceId, activeTabId);
+	}, [activeTabId, setSelectedTerminalForSpace, spaceId]);
 
 	useEffect(() => {
 		setSelectedServer(serverId);
@@ -106,9 +138,6 @@ function ServerPage() {
 
 	const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 	const [sidebarWidth, setSidebarWidth] = useState(280);
-	const [activatedTerminalIds, setActivatedTerminalIds] = useState<Set<string>>(
-		() => new Set(),
-	);
 	const [openFilePath, setOpenFilePath] = useState<string | null>(null);
 
 	const handleResizeMouseDown = useCallback(
@@ -134,22 +163,6 @@ function ServerPage() {
 		setOpenFilePath(filePath);
 	}, []);
 
-	useEffect(() => {
-		if (!activeTabId) {
-			return;
-		}
-
-		setActivatedTerminalIds((prev) => {
-			if (prev.has(activeTabId)) {
-				return prev;
-			}
-
-			const next = new Set(prev);
-			next.add(activeTabId);
-			return next;
-		});
-	}, [activeTabId]);
-
 	const handleCloseTab = useCallback(
 		(terminalId: string) => {
 			if (!spaceId) {
@@ -162,24 +175,22 @@ function ServerPage() {
 			if (wasActive) {
 				const remainingTabs = tabs.filter((t) => t.id !== terminalId);
 				const newActiveId = remainingTabs[0]?.id;
+				setSelectedTerminalForSpace(spaceId, newActiveId ?? null);
 				if (newActiveId) {
 					navigate({ search: { space: spaceId, tab: newActiveId } });
 				} else {
 					navigate({ search: { space: spaceId } });
 				}
 			}
-
-			setActivatedTerminalIds((prev) => {
-				if (!prev.has(terminalId)) {
-					return prev;
-				}
-
-				const next = new Set(prev);
-				next.delete(terminalId);
-				return next;
-			});
 		},
-		[activeTabId, removeTerminalFromSpace, navigate, spaceId, tabs],
+		[
+			activeTabId,
+			navigate,
+			removeTerminalFromSpace,
+			setSelectedTerminalForSpace,
+			spaceId,
+			tabs,
+		],
 	);
 
 	useAppHotkey(
@@ -207,6 +218,16 @@ function ServerPage() {
 		{ preventDefault: true },
 		[setIsSidebarOpen],
 	);
+
+	const useGhostty = useGhosttyEnabled();
+	const TerminalComponent = useGhostty ? GhosttySSHTerminal : SSHTerminal;
+	const activeTerminal = useMemo(() => {
+		if (!activeTabId) {
+			return null;
+		}
+
+		return tabs.find((terminal) => terminal.id === activeTabId) ?? null;
+	}, [activeTabId, tabs]);
 
 	if (!server) {
 		return (
@@ -309,52 +330,46 @@ function ServerPage() {
 				</div>
 
 				<div className="flex flex-1 min-h-0">
-				<div className="relative flex-1 min-w-0">
-					{tabs.map((terminal) => {
-						const isVisible = terminal.id === activeTabId;
-						if (!activatedTerminalIds.has(terminal.id)) {
-							return null;
-						}
-
-						return (
-							<div
-								key={terminal.id}
-								className={`absolute inset-0 ${isVisible ? "" : "invisible pointer-events-none"}`}
-							>
-								<SSHTerminal
+					<div className="relative flex-1 min-w-0">
+						{activeTerminal ? (
+							<div key={activeTerminal.id} className="absolute inset-0">
+								<TerminalComponent
 									serverId={serverId}
-									terminalId={terminal.id}
-									cwd={terminalCwds[terminal.id]}
+									terminalId={activeTerminal.id}
+									cwd={terminalCwds[activeTerminal.id]}
+									isActive={true}
 									onCwdChange={(cwd) => {
-										setTerminalCwd(terminal.id, cwd);
+										setTerminalCwd(activeTerminal.id, cwd);
 										if (spaceId) {
 											const dirName = cwd.split("/").filter(Boolean).pop();
 											if (dirName) {
-												setTerminalLabel(spaceId, terminal.id, dirName);
+												setTerminalLabel(spaceId, activeTerminal.id, dirName);
 											}
 										}
 									}}
 									onTitleChange={(title) => {
 										if (spaceId && title) {
-											setTerminalLabel(spaceId, terminal.id, title);
+											setTerminalLabel(spaceId, activeTerminal.id, title);
 										}
 									}}
 								/>
 							</div>
-						);
-					})}
-				</div>
-
-				{openFilePath && (
-					<div className="shrink-0 border-l border-border flex flex-col" style={{ width: "50%" }}>
-						<RemoteFileViewer
-							serverId={serverId}
-							filePath={openFilePath}
-							onClose={() => setOpenFilePath(null)}
-						/>
+						) : null}
 					</div>
-				)}
-			</div>
+
+					{openFilePath && (
+						<div
+							className="shrink-0 border-l border-border flex flex-col"
+							style={{ width: "50%" }}
+						>
+							<RemoteFileViewer
+								serverId={serverId}
+								filePath={openFilePath}
+								onClose={() => setOpenFilePath(null)}
+							/>
+						</div>
+					)}
+				</div>
 			</div>
 
 			{isSidebarOpen && (

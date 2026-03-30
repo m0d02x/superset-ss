@@ -32,10 +32,14 @@ export interface ShellSession {
 	id: string;
 	serverId: string;
 	stream: ClientChannel;
+	tmuxSession?: string;
 }
 
 const MAX_CONCURRENT_EXEC = 5;
 const MAX_CONCURRENT_SHELL_OPEN = 3;
+const MAX_TOTAL_CHANNELS = 8;
+const SHELL_OPEN_RETRY_DELAY_MS = 500;
+const SHELL_OPEN_MAX_RETRIES = 3;
 
 class SSHConnectionManager extends EventEmitter {
 	private connections = new Map<string, SSHConnectionEntry>();
@@ -64,6 +68,8 @@ class SSHConnectionManager extends EventEmitter {
 				clearTimeout(connectTimeout);
 				this.connections.set(config.serverId, { client });
 				this.emitStatus(config.serverId, "connected");
+				// Clean up orphaned ss-* tmux sessions from previous app runs
+				this.cleanupStaleTmuxSessions(config.serverId).catch(() => {});
 				resolve();
 			});
 
@@ -176,6 +182,7 @@ class SSHConnectionManager extends EventEmitter {
 			const active = this.execConcurrency.get(serverId) ?? 1;
 			this.execConcurrency.set(serverId, active - 1);
 		}
+		this.emit("channelReleased");
 	}
 
 	private acquireShellOpenSlot(serverId: string): Promise<void> {
@@ -203,20 +210,56 @@ class SSHConnectionManager extends EventEmitter {
 		}
 	}
 
+	/** Count active channels (shells + execs) for a server */
+	private getActiveChannelCount(serverId: string): number {
+		let count = 0;
+		for (const session of this.shells.values()) {
+			if (session.serverId === serverId) count++;
+		}
+		count += this.execConcurrency.get(serverId) ?? 0;
+		return count;
+	}
+
+	/** Wait until total channel count drops below the limit (5s timeout) */
+	private async waitForChannelCapacity(serverId: string): Promise<void> {
+		if (this.getActiveChannelCount(serverId) < MAX_TOTAL_CHANNELS) return;
+
+		await new Promise<void>((resolve) => {
+			const timeout = setTimeout(() => {
+				this.removeListener("channelReleased", check);
+				resolve(); // Proceed anyway after timeout — let the retry loop handle failure
+			}, 5_000);
+
+			const check = () => {
+				if (this.getActiveChannelCount(serverId) < MAX_TOTAL_CHANNELS) {
+					clearTimeout(timeout);
+					this.removeListener("channelReleased", check);
+					resolve();
+				}
+			};
+			this.on("channelReleased", check);
+		});
+	}
+
 	/** Open an interactive PTY shell session, returns session ID */
 	async openShell(
 		serverId: string,
-		opts: { cols: number; rows: number; cwd?: string },
+		opts: { cols: number; rows: number; cwd?: string; tmuxSession?: string },
 	): Promise<string> {
 		const entry = this.connections.get(serverId);
 		if (!entry) {
 			throw new Error(`Not connected to server ${serverId}`);
 		}
 
+		// Gate on total channel capacity before acquiring the open slot
+		await this.waitForChannelCapacity(serverId);
 		await this.acquireShellOpenSlot(serverId);
-		const stream = await (async () => {
+
+		let lastError: Error | null = null;
+
+		for (let attempt = 1; attempt <= SHELL_OPEN_MAX_RETRIES; attempt++) {
 			try {
-				return await new Promise<ClientChannel>((resolve, reject) => {
+				const stream = await new Promise<ClientChannel>((resolve, reject) => {
 					entry.client.shell(
 						{
 							term: "xterm-256color",
@@ -229,34 +272,98 @@ class SSHConnectionManager extends EventEmitter {
 						},
 					);
 				});
-			} finally {
+
 				this.releaseShellOpenSlot(serverId);
+
+				const sessionId = randomUUID();
+				this.shells.set(sessionId, {
+					id: sessionId,
+					serverId,
+					stream,
+					tmuxSession: opts.tmuxSession,
+				});
+
+				// Emit shell data events
+				stream.on("data", (data: Buffer) => {
+					this.emit(`shell:data:${sessionId}`, data.toString());
+				});
+				stream.on("close", () => {
+					this.emit(`shell:close:${sessionId}`);
+					this.shells.delete(sessionId);
+					this.emit("channelReleased");
+				});
+
+				if (opts.tmuxSession) {
+					// Use tmux for persistent sessions.
+					// -A: attach if session exists, create if not
+					// -s: session name
+					// -c: starting directory (only applies on new session creation)
+					const name = this.sanitizeTmuxName(opts.tmuxSession);
+					const cwdArg = opts.cwd
+						? ` -c ${this.shellQuote(opts.cwd.trim())}`
+						: "";
+					stream.write(
+						`TMUX= tmux new-session -As ${name}${cwdArg}\n`,
+					);
+					// Configure tmux for seamless integration after attach:
+					// - status off: hide tmux status bar (app has its own chrome)
+					// - set-clipboard on: allow OSC 52 clipboard sequences
+					// - allow-passthrough on: let escape sequences reach xterm.js
+					// - mouse off: let xterm.js handle selection/copy natively
+					// - history-limit 50000: generous scrollback
+					// - escape-time 0: no delay for escape sequences
+					const tmuxSetup = [
+						// Clipboard & passthrough: let OSC 52 and other escape
+						// sequences pass through tmux to xterm.js
+						"tmux set -s set-clipboard on 2>/dev/null",
+						"tmux set -s allow-passthrough on 2>/dev/null",
+						// Use xterm-256color so TUI apps inside tmux (opencode, etc.)
+						// know they can use OSC 52 clipboard and full escape sequences
+						"tmux set -s default-terminal xterm-256color 2>/dev/null",
+						"tmux set -s focus-events on 2>/dev/null",
+						"tmux set mouse off",
+						"tmux set status off",
+						"tmux set history-limit 50000",
+						"tmux set escape-time 0",
+						// Override TERM for the current shell too
+						"export TERM=xterm-256color",
+						"clear",
+					].join("; ");
+					// Small delay to ensure tmux session is ready before configuring
+					setTimeout(() => {
+						const shell = this.shells.get(sessionId);
+						if (shell) {
+							shell.stream.write(`${tmuxSetup}\n`);
+						}
+					}, 300);
+				} else if (opts.cwd) {
+					const targetCwd = opts.cwd.trim();
+					const cdCommand = targetCwd.startsWith("~/")
+						? `cd ~/${JSON.stringify(targetCwd.slice(2))}`
+						: targetCwd === "~"
+							? "cd ~"
+							: `cd ${JSON.stringify(targetCwd)}`;
+					stream.write(`${cdCommand} && clear\n`);
+				}
+
+				return sessionId;
+			} catch (err) {
+				lastError = err instanceof Error ? err : new Error(String(err));
+				const isChannelFailure =
+					lastError.message.includes("Channel open failure");
+
+				if (!isChannelFailure || attempt >= SHELL_OPEN_MAX_RETRIES) {
+					break;
+				}
+				// Wait before retrying to let channels free up
+				await new Promise((r) =>
+					setTimeout(r, SHELL_OPEN_RETRY_DELAY_MS * attempt),
+				);
 			}
-		})();
-
-		const sessionId = randomUUID();
-		this.shells.set(sessionId, { id: sessionId, serverId, stream });
-
-		if (opts.cwd) {
-			const targetCwd = opts.cwd.trim();
-			const cdCommand = targetCwd.startsWith("~/")
-				? `cd ~/${JSON.stringify(targetCwd.slice(2))}`
-				: targetCwd === "~"
-					? "cd ~"
-					: `cd ${JSON.stringify(targetCwd)}`;
-			stream.write(`${cdCommand} && clear\n`);
 		}
 
-		// Emit shell data events
-		stream.on("data", (data: Buffer) => {
-			this.emit(`shell:data:${sessionId}`, data.toString());
-		});
-		stream.on("close", () => {
-			this.emit(`shell:close:${sessionId}`);
-			this.shells.delete(sessionId);
-		});
-
-		return sessionId;
+		this.releaseShellOpenSlot(serverId);
+		throw lastError ?? new Error("Failed to open shell");
 	}
 
 	/** Write data to a shell session */
@@ -273,21 +380,89 @@ class SSHConnectionManager extends EventEmitter {
 		session.stream.setWindow(rows, cols, 0, 0);
 	}
 
-	/** Close a shell session */
-	closeShell(sessionId: string): void {
+	/**
+	 * Close a shell session.
+	 * @param killTmux - if true, also kill the remote tmux session. Pass false
+	 *   when reconnecting so the tmux session survives for reattach.
+	 */
+	closeShell(sessionId: string, killTmux = true): void {
 		const session = this.shells.get(sessionId);
 		if (!session) return;
-		session.stream.close();
+
+		// Remove from map immediately to free the slot for channel counting
 		this.shells.delete(sessionId);
+
+		if (killTmux && session.tmuxSession) {
+			// Kill the tmux session via a separate exec so it reliably runs
+			// before we tear down the shell channel.
+			const name = this.sanitizeTmuxName(session.tmuxSession);
+			this.exec(session.serverId, `tmux kill-session -t ${name} 2>/dev/null`)
+				.catch(() => {})
+				.finally(() => {
+					session.stream.close();
+					this.emit("channelReleased");
+				});
+		} else {
+			session.stream.close();
+			this.emit("channelReleased");
+		}
+	}
+
+	/** Sanitize a tmux session name (alphanumeric, dash, underscore only) */
+	private sanitizeTmuxName(name: string): string {
+		return name.replace(/[^a-zA-Z0-9_-]/g, "-");
+	}
+
+	/** Shell-quote a string for safe use in a remote command */
+	private shellQuote(s: string): string {
+		return `'${s.replace(/'/g, "'\\''")}'`;
+	}
+
+	/** Kill detached ss-* tmux sessions left over from previous app runs */
+	private async cleanupStaleTmuxSessions(serverId: string): Promise<void> {
+		const result = await this.exec(
+			serverId,
+			"tmux list-sessions -F '#{session_name} #{session_attached}' 2>/dev/null",
+		);
+		if (result.code !== 0) return;
+
+		const stale = result.stdout
+			.split("\n")
+			.filter((line) => {
+				const [name, attached] = line.trim().split(" ");
+				return name?.startsWith("ss-") && attached === "0";
+			})
+			.map((line) => line.split(" ")[0]);
+
+		for (const name of stale) {
+			await this.exec(
+				serverId,
+				`tmux kill-session -t ${name} 2>/dev/null`,
+			).catch(() => {});
+		}
 	}
 
 	disconnect(serverId: string): void {
 		const entry = this.connections.get(serverId);
 		if (!entry) return;
 
+		// Clean up all shells for this server
+		for (const [sessionId, session] of this.shells) {
+			if (session.serverId === serverId) {
+				this.shells.delete(sessionId);
+			}
+		}
+
+		// Reset concurrency tracking for this server
+		this.execConcurrency.delete(serverId);
+		this.execQueues.delete(serverId);
+		this.shellOpenConcurrency.delete(serverId);
+		this.shellOpenQueues.delete(serverId);
+
 		entry.client.end();
 		this.connections.delete(serverId);
 		this.emitStatus(serverId, "disconnected");
+		this.emit("channelReleased");
 	}
 
 	disconnectAll(): void {

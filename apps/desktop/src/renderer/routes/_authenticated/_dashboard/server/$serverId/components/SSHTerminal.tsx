@@ -1,14 +1,26 @@
 import { Button } from "@superset/ui/button";
+import { ClipboardAddon } from "@xterm/addon-clipboard";
 import { FitAddon } from "@xterm/addon-fit";
+import { SerializeAddon } from "@xterm/addon-serialize";
 import { Terminal as XTerm } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { electronTrpc } from "renderer/lib/electron-trpc";
+import {
+	buildRemoteSessionKey,
+	useRemoteSessionsStore,
+} from "renderer/stores/remote-sessions";
+import {
+	clearRemoteTerminalSnapshot,
+	getRemoteTerminalSnapshot,
+	saveRemoteTerminalSnapshot,
+} from "renderer/stores/remote-sessions/view-state";
 
 interface SSHTerminalProps {
 	serverId: string;
 	terminalId: string;
 	cwd?: string;
+	isActive?: boolean;
 	onCwdChange?: (cwd: string) => void;
 	onTitleChange?: (title: string) => void;
 }
@@ -41,6 +53,7 @@ export function SSHTerminal({
 	serverId,
 	terminalId,
 	cwd,
+	isActive = false,
 	onCwdChange,
 	onTitleChange,
 }: SSHTerminalProps) {
@@ -48,27 +61,34 @@ export function SSHTerminal({
 	const cleanupRef = useRef<(() => void) | null>(null);
 	const initialCwdRef = useRef(cwd);
 	const cwdBufferRef = useRef("");
-	const [status, setStatus] = useState<"connecting" | "open" | "closed">(
-		"connecting",
-	);
-	const [sessionId, setSessionId] = useState<string | null>(null);
-	const [mountKey, setMountKey] = useState(0);
 	const terminalRef = useRef<XTerm | null>(null);
+	const fitAddonRef = useRef<FitAddon | null>(null);
+	const serializeAddonRef = useRef<SerializeAddon | null>(null);
+	const cacheKey = buildRemoteSessionKey({ serverId, terminalId });
+	const sessionEntry = useRemoteSessionsStore(
+		useCallback((state) => state.sessions[cacheKey] ?? null, [cacheKey]),
+	);
+	const acquireSession = useRemoteSessionsStore(
+		(state) => state.acquireSession,
+	);
+	const reconnectSession = useRemoteSessionsStore(
+		(state) => state.reconnectSession,
+	);
+	const releaseSession = useRemoteSessionsStore(
+		(state) => state.releaseSession,
+	);
+	const markSessionClosed = useRemoteSessionsStore(
+		(state) => state.markSessionClosed,
+	);
+	const sessionId = sessionEntry?.sessionId ?? null;
+	const status = sessionEntry?.status ?? "idle";
 
-	const openShell = electronTrpc.servers.openShell.useMutation();
 	const writeShell = electronTrpc.servers.writeShell.useMutation();
 	const resizeShell = electronTrpc.servers.resizeShell.useMutation();
-	const closeShell = electronTrpc.servers.closeShell.useMutation();
-	const openShellRef = useRef(openShell.mutate);
 	const writeShellRef = useRef(writeShell.mutate);
 	const resizeShellRef = useRef(resizeShell.mutate);
-	const closeShellRef = useRef(closeShell.mutate);
 	const onCwdChangeRef = useRef(onCwdChange);
 	const onTitleChangeRef = useRef(onTitleChange);
-
-	useEffect(() => {
-		openShellRef.current = openShell.mutate;
-	}, [openShell.mutate]);
 
 	useEffect(() => {
 		writeShellRef.current = writeShell.mutate;
@@ -77,10 +97,6 @@ export function SSHTerminal({
 	useEffect(() => {
 		resizeShellRef.current = resizeShell.mutate;
 	}, [resizeShell.mutate]);
-
-	useEffect(() => {
-		closeShellRef.current = closeShell.mutate;
-	}, [closeShell.mutate]);
 
 	useEffect(() => {
 		onCwdChangeRef.current = onCwdChange;
@@ -114,7 +130,10 @@ export function SSHTerminal({
 					}
 				} else if (msg.type === "close") {
 					terminalRef.current?.writeln("\r\n[session closed]");
-					setStatus("closed");
+					if (sessionId) {
+						clearRemoteTerminalSnapshot(cacheKey);
+						markSessionClosed(cacheKey, sessionId);
+					}
 				}
 			},
 		},
@@ -125,11 +144,11 @@ export function SSHTerminal({
 		const container = containerRef.current;
 		if (!container) return;
 
-		let cancelled = false;
-
 		const fitAddon = new FitAddon();
+		fitAddonRef.current = fitAddon;
 		const terminal = new XTerm({
 			cursorBlink: true,
+			allowProposedApi: true,
 			fontFamily:
 				'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
 			fontSize: 13,
@@ -140,94 +159,183 @@ export function SSHTerminal({
 		});
 		terminalRef.current = terminal;
 		terminal.loadAddon(fitAddon);
+		terminal.loadAddon(new ClipboardAddon());
+		const serializeAddon = new SerializeAddon();
+		serializeAddonRef.current = serializeAddon;
+		terminal.loadAddon(serializeAddon);
 		terminal.open(container);
 		fitAddon.fit();
 		terminal.focus();
 
-		setStatus("connecting");
-
-		const MAX_RETRIES = 3;
-		const RETRY_DELAY_MS = 800;
-
-		function attemptOpenShell(attempt: number) {
-			if (cancelled) return;
-
-			openShellRef.current(
-				{
-					serverId,
-					cols: terminal.cols,
-					rows: terminal.rows,
-					cwd: initialCwdRef.current,
-				},
-				{
-					onSuccess: ({ sessionId: sid }) => {
-						if (cancelled) {
-							closeShellRef.current({ sessionId: sid });
-							return;
-						}
-						setSessionId(sid);
-						setStatus("open");
-
-						// Wire terminal input → shell
-						const onDataDispose = terminal.onData((data) => {
-							writeShellRef.current({ sessionId: sid, data });
-						});
-
-						// Wire terminal title changes (OSC 0/1/2 from shell)
-						const onTitleDispose = terminal.onTitleChange((title) => {
-							onTitleChangeRef.current?.(title);
-						});
-
-						// Wire resize
-						const resizeObserver = new ResizeObserver(() => {
-							fitAddon.fit();
-							resizeShellRef.current({
-								sessionId: sid,
-								cols: terminal.cols,
-								rows: terminal.rows,
-							});
-						});
-						resizeObserver.observe(container);
-
-						// Cleanup on unmount stored in ref
-						cleanupRef.current = () => {
-							onDataDispose.dispose();
-							onTitleDispose.dispose();
-							resizeObserver.disconnect();
-							closeShellRef.current({ sessionId: sid });
-						};
-					},
-					onError: (err) => {
-						if (cancelled) return;
-
-						if (
-							attempt < MAX_RETRIES &&
-							err.message.includes("Channel open failure")
-						) {
-							terminal.writeln(
-								`\r\n\x1b[33mChannel busy, retrying (${attempt}/${MAX_RETRIES})...\x1b[0m`,
-							);
-							setTimeout(() => attemptOpenShell(attempt + 1), RETRY_DELAY_MS);
-						} else {
-							terminal.writeln(
-								`\r\n\x1b[31mFailed to open shell: ${err.message}\x1b[0m`,
-							);
-							setStatus("closed");
-						}
-					},
-				},
-			);
+		const snapshotAnsi = getRemoteTerminalSnapshot(cacheKey);
+		if (snapshotAnsi) {
+			terminal.write(snapshotAnsi);
 		}
 
-		attemptOpenShell(1);
-
 		return () => {
-			cancelled = true;
-			cleanupRef.current?.();
+			if (serializeAddonRef.current) {
+				saveRemoteTerminalSnapshot({
+					key: cacheKey,
+					serializer: serializeAddonRef.current,
+				});
+			}
+			serializeAddonRef.current = null;
+			fitAddonRef.current = null;
 			terminal.dispose();
 			terminalRef.current = null;
 		};
-	}, [serverId, mountKey]);
+	}, [cacheKey]);
+
+	useEffect(() => {
+		let cancelled = false;
+
+		void acquireSession({
+			key: cacheKey,
+			serverId,
+			cwd: initialCwdRef.current,
+			tmuxSession: `ss-${terminalId}`,
+		}).catch((error) => {
+			if (cancelled) {
+				return;
+			}
+			terminalRef.current?.writeln(
+				`\r\n\x1b[31mFailed to open shell: ${error instanceof Error ? error.message : String(error)}\x1b[0m`,
+			);
+		});
+
+		return () => {
+			cancelled = true;
+			releaseSession(cacheKey);
+		};
+	}, [acquireSession, cacheKey, releaseSession, serverId]);
+
+	useEffect(() => {
+		const container = containerRef.current;
+		const terminal = terminalRef.current;
+		const fitAddon = fitAddonRef.current;
+		if (!container || !terminal || !fitAddon || !sessionId) {
+			cleanupRef.current = null;
+			return;
+		}
+
+		const onDataDispose = terminal.onData((data) => {
+			writeShellRef.current({ sessionId, data });
+		});
+
+		const onTitleDispose = terminal.onTitleChange((title) => {
+			onTitleChangeRef.current?.(title);
+		});
+
+		const resizeObserver = new ResizeObserver(() => {
+			fitAddon.fit();
+			resizeShellRef.current({
+				sessionId,
+				cols: terminal.cols,
+				rows: terminal.rows,
+			});
+		});
+		resizeObserver.observe(container);
+
+		const isRenderable = () => {
+			const rect = container.getBoundingClientRect();
+			return rect.width > 1 && rect.height > 1;
+		};
+
+		const recoverVisibility = (forceResize: boolean) => {
+			if (!isRenderable()) return;
+			const prevCols = terminal.cols;
+			const prevRows = terminal.rows;
+			const wasAtBottom =
+				terminal.buffer.active.viewportY >= terminal.buffer.active.baseY;
+
+			fitAddon.fit();
+			terminal.refresh(0, Math.max(0, terminal.rows - 1));
+
+			if (
+				forceResize ||
+				terminal.cols !== prevCols ||
+				terminal.rows !== prevRows
+			) {
+				resizeShellRef.current({
+					sessionId,
+					cols: terminal.cols,
+					rows: terminal.rows,
+				});
+			}
+
+			if (!wasAtBottom) return;
+			requestAnimationFrame(() => {
+				if (terminalRef.current !== terminal) return;
+				terminal.scrollToBottom();
+			});
+		};
+
+		const handleVisibilityChange = () => {
+			if (document.hidden) return;
+			recoverVisibility(true);
+		};
+
+		const handleWindowFocus = () => {
+			recoverVisibility(true);
+		};
+
+		document.addEventListener("visibilitychange", handleVisibilityChange);
+		window.addEventListener("focus", handleWindowFocus);
+
+		cleanupRef.current = () => {
+			onDataDispose.dispose();
+			onTitleDispose.dispose();
+			resizeObserver.disconnect();
+			document.removeEventListener("visibilitychange", handleVisibilityChange);
+			window.removeEventListener("focus", handleWindowFocus);
+		};
+
+		return () => {
+			cleanupRef.current?.();
+			cleanupRef.current = null;
+		};
+	}, [sessionId]);
+
+	useEffect(() => {
+		if (!isActive) {
+			return;
+		}
+
+		const terminal = terminalRef.current;
+		const fitAddon = fitAddonRef.current;
+		const container = containerRef.current;
+		if (!terminal || !fitAddon || !container) {
+			return;
+		}
+
+		requestAnimationFrame(() => {
+			if (!terminalRef.current || terminalRef.current !== terminal) {
+				return;
+			}
+
+			const rect = container.getBoundingClientRect();
+			if (rect.width <= 1 || rect.height <= 1) {
+				return;
+			}
+
+			const prevCols = terminal.cols;
+			const prevRows = terminal.rows;
+			fitAddon.fit();
+			terminal.refresh(0, Math.max(0, terminal.rows - 1));
+			terminal.focus();
+
+			if (
+				sessionId &&
+				(terminal.cols !== prevCols || terminal.rows !== prevRows)
+			) {
+				resizeShellRef.current({
+					sessionId,
+					cols: terminal.cols,
+					rows: terminal.rows,
+				});
+			}
+		});
+	}, [isActive, sessionId]);
 
 	return (
 		<div className="flex h-full w-full flex-col">
@@ -235,7 +343,7 @@ export function SSHTerminal({
 				<span className="text-xs text-muted-foreground">
 					{status === "open"
 						? "SSH Shell"
-						: status === "connecting"
+						: status === "opening" || status === "idle"
 							? "Opening shell..."
 							: "Disconnected"}
 				</span>
@@ -251,9 +359,17 @@ export function SSHTerminal({
 					onClick={() => {
 						cleanupRef.current?.();
 						cleanupRef.current = null;
-						setSessionId(null);
-						setStatus("connecting");
-						setMountKey((k) => k + 1);
+						clearRemoteTerminalSnapshot(cacheKey);
+						void reconnectSession({
+							key: cacheKey,
+							serverId,
+							cwd: initialCwdRef.current,
+							tmuxSession: `ss-${terminalId}`,
+						}).catch((error) => {
+							terminalRef.current?.writeln(
+								`\r\n\x1b[31mFailed to reopen shell: ${error instanceof Error ? error.message : String(error)}\x1b[0m`,
+							);
+						});
 					}}
 				>
 					Reconnect

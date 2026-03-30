@@ -2,6 +2,7 @@ import {
 	projects,
 	type SelectProject,
 	type SelectServer,
+	serverSpaces,
 	servers,
 	workspaces,
 	worktrees,
@@ -500,6 +501,7 @@ export const createServersRouter = () => {
 					cols: z.number().default(120),
 					rows: z.number().default(30),
 					cwd: z.string().optional(),
+					tmuxSession: z.string().optional(),
 				}),
 			)
 			.mutation(async ({ input }) => {
@@ -508,6 +510,7 @@ export const createServersRouter = () => {
 					cols: input.cols,
 					rows: input.rows,
 					cwd: input.cwd,
+					tmuxSession: input.tmuxSession,
 				});
 				return { sessionId };
 			}),
@@ -536,10 +539,15 @@ export const createServersRouter = () => {
 
 		/** Close a shell session */
 		closeShell: publicProcedure
-			.input(z.object({ sessionId: z.string() }))
+			.input(
+				z.object({
+					sessionId: z.string(),
+					killTmux: z.boolean().default(true),
+				}),
+			)
 			.mutation(({ input }) => {
 				const manager = getSSHConnectionManager();
-				manager.closeShell(input.sessionId);
+				manager.closeShell(input.sessionId, input.killTmux);
 			}),
 
 		/** Subscribe to shell session output */
@@ -666,6 +674,68 @@ export const createServersRouter = () => {
 				};
 			});
 		}),
+
+		// ── Server Spaces CRUD ──────────────────────────────────
+
+		listSpaces: publicProcedure
+			.input(z.object({ serverId: z.string() }))
+			.query(({ input }) => {
+				return localDb
+					.select()
+					.from(serverSpaces)
+					.where(eq(serverSpaces.serverId, input.serverId))
+					.all();
+			}),
+
+		createSpace: publicProcedure
+			.input(
+				z.object({
+					serverId: z.string(),
+					label: z.string().min(1),
+					directory: z.string().optional(),
+				}),
+			)
+			.mutation(({ input }) => {
+				return localDb
+					.insert(serverSpaces)
+					.values({
+						serverId: input.serverId,
+						label: input.label,
+						directory: input.directory,
+					})
+					.returning()
+					.get();
+			}),
+
+		updateSpace: publicProcedure
+			.input(
+				z.object({
+					id: z.string(),
+					label: z.string().min(1).optional(),
+					directory: z.string().nullable().optional(),
+					color: z.string().nullable().optional(),
+					sortOrder: z.number().int().optional(),
+				}),
+			)
+			.mutation(({ input }) => {
+				const { id, ...updates } = input;
+				return localDb
+					.update(serverSpaces)
+					.set({ ...updates, updatedAt: Date.now() })
+					.where(eq(serverSpaces.id, id))
+					.returning()
+					.get();
+			}),
+
+		deleteSpace: publicProcedure
+			.input(z.object({ id: z.string() }))
+			.mutation(({ input }) => {
+				localDb
+					.delete(serverSpaces)
+					.where(eq(serverSpaces.id, input.id))
+					.run();
+				return { success: true };
+			}),
 	});
 };
 

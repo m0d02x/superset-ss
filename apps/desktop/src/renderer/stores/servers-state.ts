@@ -9,6 +9,7 @@ export interface ServerTerminal {
 export interface ServersState {
 	selectedServerId: string | null;
 	selectedSpaceId: string | null;
+	selectedTerminalBySpace: Record<string, string | null>;
 	isAddServerDialogOpen: boolean;
 	collapsedServers: Record<string, boolean>;
 	isServersCollapsed: boolean;
@@ -28,9 +29,18 @@ export interface ServersState {
 	addTerminalToSpace: (spaceId: string) => ServerTerminal;
 	removeTerminalFromSpace: (spaceId: string, terminalId: string) => void;
 	getSpaceTerminals: (spaceId: string) => ServerTerminal[];
+	setSelectedTerminalForSpace: (
+		spaceId: string,
+		terminalId: string | null,
+	) => void;
+	getSelectedTerminalForSpace: (spaceId: string) => string | null;
 	setTerminalCwd: (terminalId: string, cwd: string) => void;
 	getTerminalCwd: (terminalId: string) => string | undefined;
-	setTerminalLabel: (spaceId: string, terminalId: string, label: string) => void;
+	setTerminalLabel: (
+		spaceId: string,
+		terminalId: string,
+		label: string,
+	) => void;
 }
 
 let terminalCounter = 0;
@@ -48,6 +58,7 @@ export const useServersStore = create<ServersState>()(
 		(set, get) => ({
 			selectedServerId: null,
 			selectedSpaceId: null,
+			selectedTerminalBySpace: {},
 			isAddServerDialogOpen: false,
 			collapsedServers: {},
 			isServersCollapsed: false,
@@ -71,6 +82,10 @@ export const useServersStore = create<ServersState>()(
 							...state.spaceTerminals,
 							[spaceId]: [...current, terminal],
 						},
+						selectedTerminalBySpace: {
+							...state.selectedTerminalBySpace,
+							[spaceId]: terminal.id,
+						},
 					};
 				});
 
@@ -80,10 +95,19 @@ export const useServersStore = create<ServersState>()(
 			removeTerminalFromSpace: (spaceId, terminalId) => {
 				set((state) => {
 					const current = state.spaceTerminals[spaceId] || [];
+					const nextTerminals = current.filter((t) => t.id !== terminalId);
+					const selectedTerminal = state.selectedTerminalBySpace[spaceId];
 					return {
 						spaceTerminals: {
 							...state.spaceTerminals,
-							[spaceId]: current.filter((t) => t.id !== terminalId),
+							[spaceId]: nextTerminals,
+						},
+						selectedTerminalBySpace: {
+							...state.selectedTerminalBySpace,
+							[spaceId]:
+								selectedTerminal === terminalId
+									? (nextTerminals[0]?.id ?? null)
+									: (selectedTerminal ?? null),
 						},
 						terminalCwds: Object.fromEntries(
 							Object.entries(state.terminalCwds).filter(
@@ -97,6 +121,16 @@ export const useServersStore = create<ServersState>()(
 			getSpaceTerminals: (spaceId) => {
 				return get().spaceTerminals[spaceId] || [];
 			},
+
+			setSelectedTerminalForSpace: (spaceId, terminalId) =>
+				set((state) => ({
+					selectedTerminalBySpace: {
+						...state.selectedTerminalBySpace,
+						[spaceId]: terminalId,
+					},
+				})),
+			getSelectedTerminalForSpace: (spaceId) =>
+				get().selectedTerminalBySpace[spaceId] ?? null,
 
 			setTerminalCwd: (terminalId, cwd) =>
 				set((state) => ({
