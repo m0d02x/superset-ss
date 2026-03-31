@@ -28,6 +28,7 @@ interface SSHTerminalProps {
 	workspaceId: string;
 	terminalId: string;
 	cwd?: string;
+	onTitleChange?: (title: string) => void;
 }
 
 export function SSHTerminal({
@@ -35,6 +36,7 @@ export function SSHTerminal({
 	workspaceId,
 	terminalId,
 	cwd,
+	onTitleChange,
 }: SSHTerminalProps) {
 	const containerRef = useRef<HTMLDivElement | null>(null);
 	const cleanupRef = useRef<(() => void) | null>(null);
@@ -67,6 +69,10 @@ export function SSHTerminal({
 	const status = sessionEntry?.status ?? "idle";
 
 	const batcherRef = useRef(new WriteBatcher());
+	const onTitleChangeRef = useRef(onTitleChange);
+	useEffect(() => {
+		onTitleChangeRef.current = onTitleChange;
+	}, [onTitleChange]);
 
 	const writeShell = electronTrpc.servers.writeShell.useMutation();
 	const resizeShell = electronTrpc.servers.resizeShell.useMutation();
@@ -147,10 +153,18 @@ export function SSHTerminal({
 			rendererDispose = renderer.dispose;
 		});
 
+		// Propagate tmux/shell title changes to tab label
+		const titleDisposable = terminal.onTitleChange((title) => {
+			if (title) {
+				onTitleChangeRef.current?.(title);
+			}
+		});
+
 		// Attach write batcher
 		batcherRef.current.attach(terminal);
 
 		return () => {
+			titleDisposable.dispose();
 			if (serializeAddonRef.current) {
 				saveRemoteTerminalSnapshot({
 					key: cacheKey,

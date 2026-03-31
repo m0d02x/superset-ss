@@ -1,11 +1,22 @@
 import { Button } from "@superset/ui/button";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuLabel,
+	DropdownMenuSeparator,
+	DropdownMenuTrigger,
+} from "@superset/ui/dropdown-menu";
 import { createFileRoute } from "@tanstack/react-router";
-import { Plus, X } from "lucide-react";
+import { ChevronDown, Plus, Terminal, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LuPanelRight } from "react-icons/lu";
 import { electronTrpc } from "renderer/lib/electron-trpc";
 import { useAppHotkey } from "renderer/stores/hotkeys";
-import { useServersStore } from "renderer/stores/servers-state";
+import {
+	type ServerTerminal,
+	useServersStore,
+} from "renderer/stores/servers-state";
 import { GhosttySSHTerminal } from "./components/GhosttySSHTerminal";
 import { SSHTerminal } from "./components/SSHTerminal";
 import { RemoteFileViewer } from "./workspace/$workspaceId/components/RemoteFileViewer";
@@ -27,6 +38,12 @@ import { ServerWorkspaceSidebar } from "./workspace/$workspaceId/components/Serv
 interface ServerSearchParams {
 	space?: string;
 	tab?: string;
+}
+
+interface TmuxSessionInfo {
+	name: string;
+	title: string;
+	attached: boolean;
 }
 
 export const Route = createFileRoute(
@@ -69,6 +86,7 @@ function ServerPage() {
 
 	const execMutation = electronTrpc.servers.exec.useMutation();
 	const restoredSpacesRef = useRef<Set<string>>(new Set());
+	const explicitTitlesRef = useRef<Set<string>>(new Set());
 
 	// Restore tabs from existing tmux sessions on the server
 	useEffect(() => {
@@ -81,20 +99,56 @@ function ServerPage() {
 			.mutateAsync({
 				id: serverId,
 				command:
-					"tmux list-sessions -F '#{session_name}' 2>/dev/null || true",
+					"tmux list-sessions -F '#{session_name}:#{session_activity}:#{pane_title}' 2>/dev/null || true",
 			})
 			.then((result) => {
 				if (result.code !== 0 || !result.stdout.trim()) return;
 
-				const existingIds = result.stdout
+				const allLines = result.stdout
 					.split("\n")
 					.map((s) => s.trim())
-					.filter((s) => s.startsWith(prefix))
-					.map((s) => s.slice(`ss-${spaceId}-`.length));
+					.filter((s) => s.startsWith(prefix));
 
-				if (existingIds.length === 0) return;
+				if (allLines.length === 0) return;
 
-				restoreTerminalsForSpace(spaceId, existingIds);
+				const allSessions = allLines.map((s) => {
+					const firstColon = s.indexOf(":", prefix.length);
+					const secondColon = s.indexOf(":", firstColon + 1);
+					const sessionName = firstColon >= 0 ? s.slice(0, firstColon) : s;
+					const activity = firstColon >= 0 && secondColon >= 0
+						? Number.parseInt(s.slice(firstColon + 1, secondColon), 10)
+						: 0;
+					const paneTitle = secondColon >= 0 ? s.slice(secondColon + 1).trim() : "";
+					const id = sessionName.slice(`ss-${spaceId}-`.length);
+					return { id, sessionName, activity, paneTitle };
+				});
+
+				// Sort by activity (most recent first), keep top 5, kill the rest
+				const MAX_RESTORED_TABS = 5;
+				allSessions.sort((a, b) => b.activity - a.activity);
+				const toRestore = allSessions.slice(0, MAX_RESTORED_TABS);
+				const toKill = allSessions.slice(MAX_RESTORED_TABS);
+
+				if (toKill.length > 0) {
+					const killCmd = toKill
+						.map((s) => `tmux kill-session -t '${s.sessionName}'`)
+						.join(" ; ");
+					execMutation.mutateAsync({
+						id: serverId,
+						command: `${killCmd} 2>/dev/null || true`,
+					});
+				}
+
+				const ids = toRestore.map(({ id }) => id);
+				restoreTerminalsForSpace(spaceId, ids);
+
+				// Apply tmux pane titles to restored tabs
+				for (const { id, paneTitle } of toRestore) {
+					if (paneTitle) {
+						setTerminalLabel(spaceId, id, paneTitle);
+						explicitTitlesRef.current.add(id);
+					}
+				}
 			});
 	}, [serverId, spaceId, server?.status]);
 
@@ -113,6 +167,17 @@ function ServerPage() {
 		if (!spaceId) return [];
 		return spaceTerminals[spaceId] || [];
 	}, [spaceId, spaceTerminals]);
+
+	// All terminals across all spaces — kept mounted to preserve scrollback
+	const allTerminals = useMemo(() => {
+		const result: Array<{ spaceId: string; terminal: ServerTerminal }> = [];
+		for (const [sid, terms] of Object.entries(spaceTerminals)) {
+			for (const t of terms) {
+				result.push({ spaceId: sid, terminal: t });
+			}
+		}
+		return result;
+	}, [spaceTerminals]);
 
 	const activeTabId = useMemo(() => {
 		if (!spaceId) return null;
@@ -167,6 +232,78 @@ function ServerPage() {
 		spaceId,
 		terminalCwds,
 	]);
+
+	// Tmux session discovery for "Attach" dropdown
+	const [tmuxSessions, setTmuxSessions] = useState<TmuxSessionInfo[]>([]);
+	const [tmuxDropdownOpen, setTmuxDropdownOpen] = useState(false);
+
+	// Fetch tmux sessions when dropdown opens — scoped to current space
+	useEffect(() => {
+		if (!tmuxDropdownOpen || !spaceId || !server || server.status !== "connected") return;
+
+		// Sessions already shown as tabs in this space
+		const currentSpaceTabs = new Set(
+			(spaceTerminals[spaceId] || []).map(
+				(t) => `ss-${spaceId}-${t.id}`,
+			),
+		);
+
+		execMutation
+			.mutateAsync({
+				id: serverId,
+				command:
+					"tmux list-sessions -F '#{session_name}:#{session_attached}:#{pane_title}' 2>/dev/null || true",
+			})
+			.then((result) => {
+				if (result.code !== 0 || !result.stdout.trim()) {
+					setTmuxSessions([]);
+					return;
+				}
+
+				const sessions = result.stdout
+					.split("\n")
+					.map((line) => line.trim())
+					.filter(Boolean)
+					.map((line) => {
+						const firstColon = line.indexOf(":");
+						const secondColon = line.indexOf(":", firstColon + 1);
+						const name = line.slice(0, firstColon);
+						const attached = line.slice(firstColon + 1, secondColon) === "1";
+						const title = line.slice(secondColon + 1).trim();
+						return { name, title, attached };
+					})
+					.filter((s) => {
+						// Only show non-Hyperset sessions (manually created tmux)
+						return !s.name.startsWith("ss-");
+					});
+
+				setTmuxSessions(sessions);
+			});
+	}, [tmuxDropdownOpen, serverId, spaceId, server?.status, spaceTerminals]);
+
+	const handleAttachTmux = useCallback(
+		(sessionName: string, sessionTitle: string) => {
+			if (!spaceId) return;
+
+			const terminal = addTerminalToSpace(spaceId);
+			if (sessionTitle) {
+				setTerminalLabel(spaceId, terminal.id, sessionTitle);
+				explicitTitlesRef.current.add(terminal.id);
+			}
+			// Override the tmux session name for this terminal
+			// We store it so acquireSession uses the external session name
+			tmuxOverridesRef.current.set(
+				`${spaceId}:${terminal.id}`,
+				sessionName,
+			);
+			navigate({
+				search: { space: spaceId, tab: terminal.id },
+			});
+		},
+		[addTerminalToSpace, navigate, setTerminalLabel, spaceId],
+	);
+
+	const tmuxOverridesRef = useRef<Map<string, string>>(new Map());
 
 	const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 	const [sidebarWidth, setSidebarWidth] = useState(280);
@@ -333,15 +470,72 @@ function ServerPage() {
 					</div>
 
 					<div className="flex shrink-0 items-center gap-0.5 px-2">
-						<Button
-							variant="ghost"
-							size="icon"
-							className="size-6"
-							onClick={handleAddTerminal}
-							title="New Terminal"
+<DropdownMenu
+							open={tmuxDropdownOpen}
+							onOpenChange={setTmuxDropdownOpen}
 						>
-							<Plus className="size-3.5" />
-						</Button>
+							<div className="flex items-center">
+								<Button
+									variant="ghost"
+									size="icon"
+									className="size-6 rounded-r-none"
+									onClick={handleAddTerminal}
+									title="New Terminal"
+								>
+									<Plus className="size-3.5" />
+								</Button>
+								<DropdownMenuTrigger asChild>
+									<Button
+										variant="ghost"
+										size="icon"
+										className="size-6 w-4 rounded-l-none px-0"
+										title="More options"
+									>
+										<ChevronDown className="size-2.5" />
+									</Button>
+								</DropdownMenuTrigger>
+							</div>
+							<DropdownMenuContent align="start" className="min-w-56">
+								<DropdownMenuItem onClick={handleAddTerminal}>
+									<Plus className="size-3.5 mr-2" />
+									New Terminal
+								</DropdownMenuItem>
+								<DropdownMenuSeparator />
+								<DropdownMenuLabel className="text-[10px] text-muted-foreground font-normal">
+									Attach tmux session
+								</DropdownMenuLabel>
+								{tmuxSessions.length === 0 ? (
+									<DropdownMenuItem disabled>
+										<span className="text-muted-foreground text-xs">
+											No external sessions found
+										</span>
+									</DropdownMenuItem>
+								) : (
+									tmuxSessions.map((session) => (
+										<DropdownMenuItem
+											key={session.name}
+											onClick={() =>
+												handleAttachTmux(
+													session.name,
+													session.title || session.name,
+												)
+											}
+										>
+											<Terminal className="size-3.5 mr-2 shrink-0" />
+											<div className="flex flex-col min-w-0">
+												<span className="text-xs truncate">
+													{session.title || session.name}
+												</span>
+												<span className="text-[10px] text-muted-foreground truncate">
+													{session.name}
+													{session.attached ? " · attached" : ""}
+												</span>
+											</div>
+										</DropdownMenuItem>
+									))
+								)}
+							</DropdownMenuContent>
+						</DropdownMenu>
 						<Button
 							variant="ghost"
 							size="icon"
@@ -363,31 +557,44 @@ function ServerPage() {
 
 				<div className="flex flex-1 min-h-0">
 					<div className="relative flex-1 min-w-0">
-						{activeTerminal ? (
-							<div key={activeTerminal.id} className="absolute inset-0">
-								<TerminalComponent
-									serverId={serverId}
-									terminalId={activeTerminal.id}
-									spaceId={spaceId}
-									cwd={terminalCwds[activeTerminal.id]}
-									isActive={true}
-									onCwdChange={(cwd) => {
-										setTerminalCwd(activeTerminal.id, cwd);
-										if (spaceId) {
-											const dirName = cwd.split("/").filter(Boolean).pop();
-											if (dirName) {
-												setTerminalLabel(spaceId, activeTerminal.id, dirName);
+						{allTerminals.map(({ spaceId: sid, terminal: tab }) => {
+							const isVisible =
+								sid === spaceId && tab.id === activeTerminal?.id;
+							return (
+								<div
+									key={`${sid}:${tab.id}`}
+									className="absolute inset-0"
+									style={{
+										visibility: isVisible ? "visible" : "hidden",
+										pointerEvents: isVisible ? "auto" : "none",
+									}}
+								>
+									<TerminalComponent
+										serverId={serverId}
+										terminalId={tab.id}
+										spaceId={sid}
+										cwd={terminalCwds[tab.id]}
+										isActive={isVisible}
+										tmuxSession={tmuxOverridesRef.current.get(`${sid}:${tab.id}`)}
+										onCwdChange={(cwd) => {
+											setTerminalCwd(tab.id, cwd);
+											if (!explicitTitlesRef.current.has(tab.id)) {
+												const dirName = cwd.split("/").filter(Boolean).pop();
+												if (dirName) {
+													setTerminalLabel(sid, tab.id, dirName);
+												}
 											}
-										}
-									}}
-									onTitleChange={(title) => {
-										if (spaceId && title) {
-											setTerminalLabel(spaceId, activeTerminal.id, title);
-										}
-									}}
-								/>
-							</div>
-						) : null}
+										}}
+										onTitleChange={(title) => {
+											if (title) {
+												setTerminalLabel(sid, tab.id, title);
+												explicitTitlesRef.current.add(tab.id);
+											}
+										}}
+									/>
+								</div>
+							);
+						})}
 					</div>
 
 					{openFilePath && (

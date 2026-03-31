@@ -261,7 +261,8 @@ protocol.registerSchemesAsPrivileged([
 	},
 ]);
 
-const gotTheLock = app.requestSingleInstanceLock();
+const isDev = process.env.NODE_ENV === "development";
+const gotTheLock = isDev || app.requestSingleInstanceLock();
 
 if (!gotTheLock) {
 	app.exit(0);

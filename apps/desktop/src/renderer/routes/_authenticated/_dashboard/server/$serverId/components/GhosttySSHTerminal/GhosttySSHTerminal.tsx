@@ -14,6 +14,7 @@ interface GhosttySSHTerminalProps {
 	spaceId?: string;
 	cwd?: string;
 	isActive?: boolean;
+	tmuxSession?: string;
 	onCwdChange?: (cwd: string) => void;
 	onTitleChange?: (title: string) => void;
 }

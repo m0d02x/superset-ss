@@ -22,6 +22,7 @@ interface SSHTerminalProps {
 	spaceId?: string;
 	cwd?: string;
 	isActive?: boolean;
+	tmuxSession?: string;
 	onCwdChange?: (cwd: string) => void;
 	onTitleChange?: (title: string) => void;
 }
@@ -56,6 +57,7 @@ export function SSHTerminal({
 	spaceId,
 	cwd,
 	isActive = false,
+	tmuxSession: tmuxSessionOverride,
 	onCwdChange,
 	onTitleChange,
 }: SSHTerminalProps) {
@@ -191,11 +193,12 @@ export function SSHTerminal({
 	useEffect(() => {
 		let cancelled = false;
 
+		const tmuxName = tmuxSessionOverride ?? (spaceId ? `ss-${spaceId}-${terminalId}` : `ss-${terminalId}`);
 		void acquireSession({
 			key: cacheKey,
 			serverId,
 			cwd: initialCwdRef.current,
-			tmuxSession: spaceId ? `ss-${spaceId}-${terminalId}` : `ss-${terminalId}`,
+			tmuxSession: tmuxName,
 		}).catch((error) => {
 			if (cancelled) {
 				return;
@@ -366,7 +369,7 @@ export function SSHTerminal({
 							key: cacheKey,
 							serverId,
 							cwd: initialCwdRef.current,
-							tmuxSession: spaceId ? `ss-${spaceId}-${terminalId}` : `ss-${terminalId}`,
+							tmuxSession: tmuxSessionOverride ?? (spaceId ? `ss-${spaceId}-${terminalId}` : `ss-${terminalId}`),
 						}).catch((error) => {
 							terminalRef.current?.writeln(
 								`\r\n\x1b[31mFailed to reopen shell: ${error instanceof Error ? error.message : String(error)}\x1b[0m`,

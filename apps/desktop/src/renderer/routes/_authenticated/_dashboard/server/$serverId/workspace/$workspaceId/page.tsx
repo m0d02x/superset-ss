@@ -54,37 +54,51 @@ function ServerWorkspacePage() {
 			.mutateAsync({
 				id: serverId,
 				command:
-					"tmux list-sessions -F '#{session_name}' 2>/dev/null || true",
+					"tmux list-sessions -F '#{session_name}:#{pane_title}' 2>/dev/null || true",
 			})
 			.then((result) => {
 				if (result.code !== 0 || !result.stdout.trim()) return;
 
-				const existingIds = result.stdout
+				const sessions = result.stdout
 					.split("\n")
 					.map((s) => s.trim())
-					.filter((s) => s.startsWith(prefix))
-					.map((s) => s.slice(`ss-${workspaceId}-`.length));
+					.filter((s) => s.startsWith(prefix));
 
-				if (existingIds.length === 0) return;
+				if (sessions.length === 0) return;
+
+				const parsed = sessions.map((s) => {
+					const colonIdx = s.indexOf(":", prefix.length);
+					const sessionName = colonIdx >= 0 ? s.slice(0, colonIdx) : s;
+					const paneTitle = colonIdx >= 0 ? s.slice(colonIdx + 1).trim() : "";
+					const id = sessionName.slice(`ss-${workspaceId}-`.length);
+					return { id, paneTitle };
+				});
 
 				// Find the highest term number to set counter
 				const maxNum = Math.max(
-					...existingIds.map((id) => {
+					...parsed.map(({ id }) => {
 						const n = Number.parseInt(id.replace("term-", ""), 10);
 						return Number.isNaN(n) ? 0 : n;
 					}),
 				);
 				tabCounterRef.current = maxNum;
 
-				const restoredTabs: Tab[] = existingIds.map((id) => {
+				const restoredTabs: Tab[] = parsed.map(({ id, paneTitle }) => {
 					const num = id.replace("term-", "");
-					return { type: "terminal", id, label: `Terminal ${num}` };
+					const label = paneTitle || `Terminal ${num}`;
+					return { type: "terminal", id, label };
 				});
 
 				setTabs(restoredTabs);
 				setActiveTabId(restoredTabs[0].id);
 			});
 	}, [serverId, workspaceId]);
+
+	const updateTabLabel = useCallback((tabId: string, label: string) => {
+		setTabs((prev) =>
+			prev.map((t) => (t.id === tabId ? { ...t, label } : t)),
+		);
+	}, []);
 
 	const addTerminal = useCallback(() => {
 		tabCounterRef.current += 1;
@@ -272,18 +286,26 @@ function ServerWorkspacePage() {
 				<div className="relative flex-1">
 					{tabs
 						.filter((t) => t.type === "terminal")
-						.map((tab) =>
-							activeTabId === tab.id ? (
-								<div key={tab.id} className="absolute inset-0">
-									<SSHTerminal
-										serverId={serverId}
-										workspaceId={workspaceId}
-										terminalId={tab.id}
-										cwd={worktreePath}
-									/>
-								</div>
-							) : null,
-						)}
+						.map((tab) => (
+							<div
+								key={tab.id}
+								className="absolute inset-0"
+								style={{
+									visibility: activeTabId === tab.id ? "visible" : "hidden",
+									pointerEvents: activeTabId === tab.id ? "auto" : "none",
+								}}
+							>
+								<SSHTerminal
+									serverId={serverId}
+									workspaceId={workspaceId}
+									terminalId={tab.id}
+									cwd={worktreePath}
+									onTitleChange={(title) =>
+										updateTabLabel(tab.id, title)
+									}
+								/>
+							</div>
+						))}
 
 					{activeTab?.type === "fileviewer" && (
 						<div className="absolute inset-0">
