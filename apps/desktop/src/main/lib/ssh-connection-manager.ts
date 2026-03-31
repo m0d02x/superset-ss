@@ -69,7 +69,7 @@ class SSHConnectionManager extends EventEmitter {
 				this.connections.set(config.serverId, { client });
 				this.emitStatus(config.serverId, "connected");
 				// Clean up orphaned ss-* tmux sessions from previous app runs
-				this.cleanupStaleTmuxSessions(config.serverId).catch(() => {});
+				this.cleanupStaleTmuxSocket(config.serverId).catch(() => {});
 				resolve();
 			});
 
@@ -302,40 +302,13 @@ class SSHConnectionManager extends EventEmitter {
 					const cwdArg = opts.cwd
 						? ` -c ${this.shellQuote(opts.cwd.trim())}`
 						: "";
+					// Tmux settings live in ~/.tmux.conf on the remote host.
+					// TERM=xterm-256color is set in ~/.bashrc on the remote host.
+					// printf \033c resets the terminal (clears any visible command echo)
+					// before tmux takes over the screen.
 					stream.write(
-						`TMUX= tmux new-session -As ${name}${cwdArg}\n`,
+						`printf '\\033c'; TMUX= tmux new-session -As ${name}${cwdArg}\n`,
 					);
-					// Configure tmux for seamless integration after attach:
-					// - status off: hide tmux status bar (app has its own chrome)
-					// - set-clipboard on: allow OSC 52 clipboard sequences
-					// - allow-passthrough on: let escape sequences reach xterm.js
-					// - mouse off: let xterm.js handle selection/copy natively
-					// - history-limit 50000: generous scrollback
-					// - escape-time 0: no delay for escape sequences
-					const tmuxSetup = [
-						// Clipboard & passthrough: let OSC 52 and other escape
-						// sequences pass through tmux to xterm.js
-						"tmux set -s set-clipboard on 2>/dev/null",
-						"tmux set -s allow-passthrough on 2>/dev/null",
-						// Use xterm-256color so TUI apps inside tmux (opencode, etc.)
-						// know they can use OSC 52 clipboard and full escape sequences
-						"tmux set -s default-terminal xterm-256color 2>/dev/null",
-						"tmux set -s focus-events on 2>/dev/null",
-						"tmux set mouse off",
-						"tmux set status off",
-						"tmux set history-limit 50000",
-						"tmux set escape-time 0",
-						// Override TERM for the current shell too
-						"export TERM=xterm-256color",
-						"clear",
-					].join("; ");
-					// Small delay to ensure tmux session is ready before configuring
-					setTimeout(() => {
-						const shell = this.shells.get(sessionId);
-						if (shell) {
-							shell.stream.write(`${tmuxSetup}\n`);
-						}
-					}, 300);
 				} else if (opts.cwd) {
 					const targetCwd = opts.cwd.trim();
 					const cdCommand = targetCwd.startsWith("~/")
@@ -418,28 +391,22 @@ class SSHConnectionManager extends EventEmitter {
 		return `'${s.replace(/'/g, "'\\''")}'`;
 	}
 
-	/** Kill detached ss-* tmux sessions left over from previous app runs */
-	private async cleanupStaleTmuxSessions(serverId: string): Promise<void> {
+	/** Clean up stale tmux socket if the server process died */
+	private async cleanupStaleTmuxSocket(serverId: string): Promise<void> {
 		const result = await this.exec(
 			serverId,
-			"tmux list-sessions -F '#{session_name} #{session_attached}' 2>/dev/null",
+			"tmux list-sessions -F '#{session_name}' 2>/dev/null",
 		);
-		if (result.code !== 0) return;
-
-		const stale = result.stdout
-			.split("\n")
-			.filter((line) => {
-				const [name, attached] = line.trim().split(" ");
-				return name?.startsWith("ss-") && attached === "0";
-			})
-			.map((line) => line.split(" ")[0]);
-
-		for (const name of stale) {
+		if (result.code !== 0) {
+			// tmux server may have a stale socket from a crash or kill —
+			// remove it so the next new-session can start fresh.
 			await this.exec(
 				serverId,
-				`tmux kill-session -t ${name} 2>/dev/null`,
-			).catch(() => {});
+				"rm -rf /tmp/tmux-$(id -u)/ 2>/dev/null",
+			);
 		}
+		// Don't kill detached ss-* sessions — they're restored as tabs
+		// when the user opens the space.
 	}
 
 	disconnect(serverId: string): void {

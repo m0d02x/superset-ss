@@ -41,6 +41,10 @@ export interface ServersState {
 		terminalId: string,
 		label: string,
 	) => void;
+	restoreTerminalsForSpace: (
+		spaceId: string,
+		terminalIds: string[],
+	) => void;
 }
 
 let terminalCounter = 0;
@@ -154,6 +158,37 @@ export const useServersStore = create<ServersState>()(
 						},
 					};
 				}),
+
+			restoreTerminalsForSpace: (spaceId, terminalIds) => {
+				if (terminalIds.length === 0) return;
+
+				// Update the module-level counter past the highest restored id
+				const maxNum = Math.max(
+					...terminalIds.map((id) => {
+						const n = Number.parseInt(id.replace("term-", ""), 10);
+						return Number.isNaN(n) ? 0 : n;
+					}),
+				);
+				if (maxNum > terminalCounter) {
+					terminalCounter = maxNum;
+				}
+
+				const terminals: ServerTerminal[] = terminalIds.map((id) => {
+					const num = id.replace("term-", "");
+					return { id, label: `Terminal ${num}` };
+				});
+
+				set((state) => ({
+					spaceTerminals: {
+						...state.spaceTerminals,
+						[spaceId]: terminals,
+					},
+					selectedTerminalBySpace: {
+						...state.selectedTerminalBySpace,
+						[spaceId]: terminals[0].id,
+					},
+				}));
+			},
 
 			toggleServerCollapsed: (serverId) =>
 				set((state) => ({

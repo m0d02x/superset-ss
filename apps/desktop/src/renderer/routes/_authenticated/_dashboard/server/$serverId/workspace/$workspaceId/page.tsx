@@ -1,9 +1,13 @@
 import { Button } from "@superset/ui/button";
 import { createFileRoute } from "@tanstack/react-router";
 import { Plus, X } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { LuPanelRight } from "react-icons/lu";
 import { electronTrpc } from "renderer/lib/electron-trpc";
+import {
+	buildRemoteSessionKey,
+	useRemoteSessionsStore,
+} from "renderer/stores/remote-sessions";
 import { RemoteFileViewer } from "./components/RemoteFileViewer";
 import { ServerWorkspaceSidebar } from "./components/ServerWorkspaceSidebar";
 import { SSHTerminal } from "./components/SSHTerminal";
@@ -18,49 +22,83 @@ type Tab =
 	| { type: "terminal"; id: string; label: string }
 	| { type: "fileviewer"; id: string; label: string; filePath: string };
 
-let tabCounter = 1;
-
 function ServerWorkspacePage() {
 	const { serverId, workspaceId } = Route.useParams();
 	const worktreePath = decodeURIComponent(workspaceId);
 	const { data: server } = electronTrpc.servers.get.useQuery({ id: serverId });
+	const execMutation = electronTrpc.servers.exec.useMutation();
+	const tabCounterRef = useRef(1);
 
 	const [tabs, setTabs] = useState<Tab[]>([
 		{ type: "terminal", id: "term-1", label: "Terminal 1" },
 	]);
 	const [activeTabId, setActiveTabId] = useState("term-1");
-	const [activatedTabIds, setActivatedTabIds] = useState<Set<string>>(
-		() => new Set(["term-1"]),
-	);
-
 	const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 	const [sidebarWidth, setSidebarWidth] = useState(260);
+	const destroySession = useRemoteSessionsStore(
+		(state) => state.destroySession,
+	);
+	const releaseSession = useRemoteSessionsStore(
+		(state) => state.releaseSession,
+	);
+	const terminalIdsRef = useRef<string[]>(["term-1"]);
+	const restoredRef = useRef(false);
+
+	// Restore tabs from existing tmux sessions on mount
+	useEffect(() => {
+		if (restoredRef.current) return;
+		restoredRef.current = true;
+
+		const prefix = `ss-${workspaceId}-term-`;
+		execMutation
+			.mutateAsync({
+				id: serverId,
+				command:
+					"tmux list-sessions -F '#{session_name}' 2>/dev/null || true",
+			})
+			.then((result) => {
+				if (result.code !== 0 || !result.stdout.trim()) return;
+
+				const existingIds = result.stdout
+					.split("\n")
+					.map((s) => s.trim())
+					.filter((s) => s.startsWith(prefix))
+					.map((s) => s.slice(`ss-${workspaceId}-`.length));
+
+				if (existingIds.length === 0) return;
+
+				// Find the highest term number to set counter
+				const maxNum = Math.max(
+					...existingIds.map((id) => {
+						const n = Number.parseInt(id.replace("term-", ""), 10);
+						return Number.isNaN(n) ? 0 : n;
+					}),
+				);
+				tabCounterRef.current = maxNum;
+
+				const restoredTabs: Tab[] = existingIds.map((id) => {
+					const num = id.replace("term-", "");
+					return { type: "terminal", id, label: `Terminal ${num}` };
+				});
+
+				setTabs(restoredTabs);
+				setActiveTabId(restoredTabs[0].id);
+			});
+	}, [serverId, workspaceId]);
 
 	const addTerminal = useCallback(() => {
-		tabCounter += 1;
-		const id = `term-${tabCounter}`;
+		tabCounterRef.current += 1;
+		const num = tabCounterRef.current;
+		const id = `term-${num}`;
 		setTabs((prev) => [
 			...prev,
-			{ type: "terminal", id, label: `Terminal ${tabCounter}` },
+			{ type: "terminal", id, label: `Terminal ${num}` },
 		]);
 		setActiveTabId(id);
-		setActivatedTabIds((prev) => {
-			const next = new Set(prev);
-			next.add(id);
-			return next;
-		});
 	}, []);
 
 	const activateTab = useCallback((tabId: string) => {
 		setActiveTabId(tabId);
-		setActivatedTabIds((prev) => {
-			if (prev.has(tabId)) {
-				return prev;
-			}
-			const next = new Set(prev);
-			next.add(tabId);
-			return next;
-		});
 	}, []);
 
 	const openFileViewer = useCallback(
@@ -85,18 +123,25 @@ function ServerWorkspacePage() {
 
 	const closeTab = useCallback(
 		(id: string) => {
+			destroySession(
+				buildRemoteSessionKey({
+					serverId,
+					workspaceId,
+					terminalId: id,
+				}),
+			);
 			setTabs((prev) => {
 				const next = prev.filter((t) => t.id !== id);
 				if (next.length === 0) {
-					tabCounter += 1;
-					const newId = `term-${tabCounter}`;
+					tabCounterRef.current += 1;
+					const num = tabCounterRef.current;
+					const newId = `term-${num}`;
 					setActiveTabId(newId);
-					setActivatedTabIds(new Set([newId]));
 					return [
 						{
 							type: "terminal" as const,
 							id: newId,
-							label: `Terminal ${tabCounter}`,
+							label: `Terminal ${num}`,
 						},
 					];
 				}
@@ -105,17 +150,34 @@ function ServerWorkspacePage() {
 				}
 				return next;
 			});
-			setActivatedTabIds((prev) => {
-				if (!prev.has(id)) {
-					return prev;
-				}
-				const next = new Set(prev);
-				next.delete(id);
-				return next;
-			});
 		},
-		[activeTabId, activateTab],
+		[activeTabId, activateTab, destroySession, serverId, workspaceId],
 	);
+
+	useEffect(() => {
+		terminalIdsRef.current = tabs
+			.filter(
+				(tab): tab is Extract<Tab, { type: "terminal" }> =>
+					tab.type === "terminal",
+			)
+			.map((tab) => tab.id);
+	}, [tabs]);
+
+	// On unmount (navigating away), release sessions so tmux stays alive
+	// for reattach. destroySession is only called on explicit tab close.
+	useEffect(() => {
+		return () => {
+			for (const terminalId of terminalIdsRef.current) {
+				releaseSession(
+					buildRemoteSessionKey({
+						serverId,
+						workspaceId,
+						terminalId,
+					}),
+				);
+			}
+		};
+	}, [releaseSession, serverId, workspaceId]);
 
 	const handleResizeMouseDown = useCallback(
 		(e: React.MouseEvent) => {
@@ -211,12 +273,14 @@ function ServerWorkspacePage() {
 					{tabs
 						.filter((t) => t.type === "terminal")
 						.map((tab) =>
-							activatedTabIds.has(tab.id) ? (
-								<div
-									key={tab.id}
-									className={`absolute inset-0 ${activeTabId === tab.id ? "" : "invisible"}`}
-								>
-									<SSHTerminal serverId={serverId} cwd={worktreePath} />
+							activeTabId === tab.id ? (
+								<div key={tab.id} className="absolute inset-0">
+									<SSHTerminal
+										serverId={serverId}
+										workspaceId={workspaceId}
+										terminalId={tab.id}
+										cwd={worktreePath}
+									/>
 								</div>
 							) : null,
 						)}

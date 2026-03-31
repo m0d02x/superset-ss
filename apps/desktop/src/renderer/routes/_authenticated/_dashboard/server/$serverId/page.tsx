@@ -1,7 +1,7 @@
 import { Button } from "@superset/ui/button";
 import { createFileRoute } from "@tanstack/react-router";
 import { Plus, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LuPanelRight } from "react-icons/lu";
 import { electronTrpc } from "renderer/lib/electron-trpc";
 import { useAppHotkey } from "renderer/stores/hotkeys";
@@ -64,7 +64,39 @@ function ServerPage() {
 		terminalCwds,
 		setTerminalCwd,
 		setTerminalLabel,
+		restoreTerminalsForSpace,
 	} = useServersStore();
+
+	const execMutation = electronTrpc.servers.exec.useMutation();
+	const restoredSpacesRef = useRef<Set<string>>(new Set());
+
+	// Restore tabs from existing tmux sessions on the server
+	useEffect(() => {
+		if (!spaceId || !server || server.status !== "connected") return;
+		if (restoredSpacesRef.current.has(spaceId)) return;
+		restoredSpacesRef.current.add(spaceId);
+
+		const prefix = `ss-${spaceId}-term-`;
+		execMutation
+			.mutateAsync({
+				id: serverId,
+				command:
+					"tmux list-sessions -F '#{session_name}' 2>/dev/null || true",
+			})
+			.then((result) => {
+				if (result.code !== 0 || !result.stdout.trim()) return;
+
+				const existingIds = result.stdout
+					.split("\n")
+					.map((s) => s.trim())
+					.filter((s) => s.startsWith(prefix))
+					.map((s) => s.slice(`ss-${spaceId}-`.length));
+
+				if (existingIds.length === 0) return;
+
+				restoreTerminalsForSpace(spaceId, existingIds);
+			});
+	}, [serverId, spaceId, server?.status]);
 
 	useEffect(() => {
 		setSelectedSpace(spaceId || null);
@@ -136,7 +168,7 @@ function ServerPage() {
 		terminalCwds,
 	]);
 
-	const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+	const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 	const [sidebarWidth, setSidebarWidth] = useState(280);
 	const [openFilePath, setOpenFilePath] = useState<string | null>(null);
 
@@ -336,6 +368,7 @@ function ServerPage() {
 								<TerminalComponent
 									serverId={serverId}
 									terminalId={activeTerminal.id}
+									spaceId={spaceId}
 									cwd={terminalCwds[activeTerminal.id]}
 									isActive={true}
 									onCwdChange={(cwd) => {

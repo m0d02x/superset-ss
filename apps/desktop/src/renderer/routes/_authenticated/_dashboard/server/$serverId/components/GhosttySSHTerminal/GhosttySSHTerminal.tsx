@@ -11,6 +11,7 @@ import { clearRemoteTerminalSnapshot } from "renderer/stores/remote-sessions/vie
 interface GhosttySSHTerminalProps {
 	serverId: string;
 	terminalId: string;
+	spaceId?: string;
 	cwd?: string;
 	isActive?: boolean;
 	onCwdChange?: (cwd: string) => void;
@@ -70,6 +71,7 @@ function safeTerminalCall(
 export function GhosttySSHTerminal({
 	serverId,
 	terminalId,
+	spaceId,
 	cwd,
 	isActive = false,
 	onCwdChange,
@@ -243,7 +245,7 @@ export function GhosttySSHTerminal({
 			key: cacheKey,
 			serverId,
 			cwd: initialCwdRef.current,
-			tmuxSession: `ss-${terminalId}`,
+			tmuxSession: spaceId ? `ss-${spaceId}-${terminalId}` : `ss-${terminalId}`,
 		}).catch((error) => {
 			if (cancelled) {
 				return;
@@ -442,7 +444,7 @@ export function GhosttySSHTerminal({
 							key: cacheKey,
 							serverId,
 							cwd: initialCwdRef.current,
-							tmuxSession: `ss-${terminalId}`,
+							tmuxSession: spaceId ? `ss-${spaceId}-${terminalId}` : `ss-${terminalId}`,
 						}).catch((error) => {
 							safeTerminalCall(terminalRef.current, (t) =>
 								t.writeln(

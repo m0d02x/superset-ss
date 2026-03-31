@@ -19,6 +19,7 @@ import {
 interface SSHTerminalProps {
 	serverId: string;
 	terminalId: string;
+	spaceId?: string;
 	cwd?: string;
 	isActive?: boolean;
 	onCwdChange?: (cwd: string) => void;
@@ -52,6 +53,7 @@ function parseOsc7Cwd(data: string): string | null {
 export function SSHTerminal({
 	serverId,
 	terminalId,
+	spaceId,
 	cwd,
 	isActive = false,
 	onCwdChange,
@@ -193,7 +195,7 @@ export function SSHTerminal({
 			key: cacheKey,
 			serverId,
 			cwd: initialCwdRef.current,
-			tmuxSession: `ss-${terminalId}`,
+			tmuxSession: spaceId ? `ss-${spaceId}-${terminalId}` : `ss-${terminalId}`,
 		}).catch((error) => {
 			if (cancelled) {
 				return;
@@ -364,7 +366,7 @@ export function SSHTerminal({
 							key: cacheKey,
 							serverId,
 							cwd: initialCwdRef.current,
-							tmuxSession: `ss-${terminalId}`,
+							tmuxSession: spaceId ? `ss-${spaceId}-${terminalId}` : `ss-${terminalId}`,
 						}).catch((error) => {
 							terminalRef.current?.writeln(
 								`\r\n\x1b[31mFailed to reopen shell: ${error instanceof Error ? error.message : String(error)}\x1b[0m`,
