@@ -247,7 +247,7 @@ async function quitApp(): Promise<void> {
 					buttons: ["OK"],
 					defaultId: 0,
 					title: "Failed to kill sessions",
-					message: "Superset could not kill terminal sessions.",
+					message: "Hyperset could not kill terminal sessions.",
 					detail:
 						"The app will stay open so you can retry or quit while keeping sessions running in the background.",
 				})
@@ -318,7 +318,7 @@ export function initTray(): void {
 		}
 
 		tray = new Tray(icon);
-		tray.setToolTip("Superset");
+		tray.setToolTip("Hyperset");
 
 		updateTrayMenu().catch((error) => {
 			console.error("[Tray] Failed to build initial menu:", error);

@@ -14,6 +14,18 @@ interface PersistedState {
 	index: number;
 }
 
+function getExplicitHashPath(): string | null {
+	try {
+		const { hash } = window.location;
+		if (!hash || hash === "#") return null;
+		const path = hash.startsWith("#") ? hash.slice(1) : hash;
+		if (!path) return null;
+		return path.startsWith("/") ? path : `/${path}`;
+	} catch {
+		return null;
+	}
+}
+
 export interface HistoryEntry {
 	path: string;
 	timestamp: number;
@@ -108,14 +120,17 @@ export interface PersistentHashHistory extends RouterHistory {
 }
 
 export function createPersistentHashHistory(): PersistentHashHistory {
+	const explicitHashPath = getExplicitHashPath();
 	const persisted = loadPersistedState();
 
-	const entries: string[] = [...persisted.entries];
+	const entries: string[] = explicitHashPath
+		? [explicitHashPath]
+		: [...persisted.entries];
 	const timestamps: number[] = entries.map(() => Date.now());
 	const states: LocationState[] = entries.map((_entry, i) =>
 		assignKeyAndIndex(i),
 	);
-	let index = persisted.index;
+	let index = explicitHashPath ? 0 : persisted.index;
 
 	const getLocation = () =>
 		parseHref(entries[index] ?? "/", states[index] ?? assignKeyAndIndex(index));
@@ -125,6 +140,9 @@ export function createPersistentHashHistory(): PersistentHashHistory {
 	>[0] = [];
 
 	syncHash(entries[index] ?? "/");
+	if (explicitHashPath) {
+		persistState(entries, index);
+	}
 
 	const history = createHistory({
 		getLocation,

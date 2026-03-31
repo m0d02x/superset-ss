@@ -138,7 +138,7 @@ export function EmptyTabView({
 			<div className="w-full max-w-xl">
 				<div className="mb-7 flex items-center justify-center py-3">
 					<img
-						alt="Superset"
+						alt="Hyperset"
 						className={`h-8 w-auto select-none ${
 							activeTheme?.type === "dark"
 								? "opacity-85"

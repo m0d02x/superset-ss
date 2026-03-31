@@ -32,6 +32,7 @@ Object.defineProperty(globalThis, "window", {
 			state: null,
 		},
 		location: {
+			hash: "",
 			pathname: "/",
 			search: "",
 		},
@@ -48,6 +49,7 @@ const { createPersistentHashHistory } = await import(
 beforeEach(() => {
 	storage.clear();
 	mockReplaceState.mockClear();
+	(globalThis.window as typeof window).location.hash = "";
 });
 
 afterEach(() => {
@@ -187,6 +189,26 @@ describe("createPersistentHashHistory", () => {
 	});
 
 	describe("localStorage persistence", () => {
+		it("prefers an explicit current hash over persisted history", () => {
+			storage.set(
+				"router-history",
+				JSON.stringify({
+					entries: ["/server/stale"],
+					index: 0,
+				}),
+			);
+
+			(globalThis.window as typeof window).location.hash = "#/";
+
+			const history = createPersistentHashHistory();
+			expect(history.length).toBe(1);
+			expect(history.location.pathname).toBe("/");
+
+			const stored = JSON.parse(storage.get("router-history") ?? "{}");
+			expect(stored.entries).toEqual(["/"]);
+			expect(stored.index).toBe(0);
+		});
+
 		it("persists entries on push", () => {
 			const history = createPersistentHashHistory();
 			history.push("/tasks");

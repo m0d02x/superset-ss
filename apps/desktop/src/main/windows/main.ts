@@ -121,7 +121,7 @@ export async function MainWindow() {
 			webviewTag: true,
 			// Isolate Electron session from system browser cookies
 			// This ensures desktop uses bearer token auth, not web cookies
-			partition: "persist:superset",
+			partition: "persist:hyperset",
 		},
 	});
 
@@ -213,10 +213,13 @@ export async function MainWindow() {
 	// macOS Sequoia+: occluded/minimized windows can lose compositor layers
 	if (PLATFORM.IS_MAC) {
 		window.on("restore", () => {
-			window.webContents.invalidate();
+			forceRepaint(window);
 		});
 		window.on("show", () => {
-			window.webContents.invalidate();
+			forceRepaint(window);
+		});
+		window.on("focus", () => {
+			forceRepaint(window);
 		});
 	}
 
@@ -281,6 +284,16 @@ export async function MainWindow() {
 		console.error(`  Path: ${preloadPath}`);
 		console.error(`  Error:`, error);
 	});
+
+	window.webContents.on(
+		"console-message",
+		(_event, level, message, line, sourceId) => {
+			const levelName = level === 3 ? "error" : level === 2 ? "warn" : "log";
+			console[levelName](
+				`[renderer-console:${levelName}] ${message} (${sourceId}:${line})`,
+			);
+		},
+	);
 
 	window.on("close", () => {
 		// Save window state first, before any cleanup

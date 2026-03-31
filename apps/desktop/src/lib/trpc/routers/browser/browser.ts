@@ -157,7 +157,7 @@ export const createBrowserRouter = () => {
 				}),
 			)
 			.mutation(async ({ input }) => {
-				const ses = session.fromPartition("persist:superset");
+				const ses = session.fromPartition("persist:hyperset");
 				switch (input.type) {
 					case "cookies":
 						await ses.clearStorageData({ storages: ["cookies"] });

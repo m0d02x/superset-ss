@@ -4,13 +4,16 @@ import {
 	ContextMenuContent,
 	ContextMenuItem,
 	ContextMenuSeparator,
+	ContextMenuSub,
+	ContextMenuSubContent,
+	ContextMenuSubTrigger,
 	ContextMenuTrigger,
 } from "@superset/ui/context-menu";
 
 import { Input } from "@superset/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@superset/ui/tooltip";
 import { cn } from "@superset/ui/utils";
-import { FolderOpen, LayoutGrid, Pencil } from "lucide-react";
+import { FolderOpen, Palette, Pencil, SquareTerminal } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { HiChevronRight, HiMiniPlus, HiMiniXMark } from "react-icons/hi2";
 import { LuPlug, LuTrash2, LuUnplug } from "react-icons/lu";
@@ -153,16 +156,30 @@ export function ServerGroupRow({
 	);
 }
 
+const SPACE_COLORS = [
+	{ name: "Red", value: "#ef4444" },
+	{ name: "Orange", value: "#f97316" },
+	{ name: "Amber", value: "#f59e0b" },
+	{ name: "Green", value: "#22c55e" },
+	{ name: "Teal", value: "#14b8a6" },
+	{ name: "Blue", value: "#3b82f6" },
+	{ name: "Indigo", value: "#6366f1" },
+	{ name: "Purple", value: "#a855f7" },
+	{ name: "Pink", value: "#ec4899" },
+] as const;
+
 interface ServerSpaceItemProps {
 	serverId: string;
 	spaceId: string;
 	label: string;
 	directory?: string;
+	color?: string;
 	isActive: boolean;
 	onSelect: () => void;
 	onClose: () => void;
 	onSetDirectory: (directory: string | undefined) => void;
 	onRename: (label: string) => void;
+	onColorChange: (color: string | null) => void;
 }
 
 export function ServerSpaceItem({
@@ -170,11 +187,13 @@ export function ServerSpaceItem({
 	spaceId: _spaceId,
 	label,
 	directory,
+	color,
 	isActive,
 	onSelect,
 	onClose,
 	onSetDirectory,
 	onRename,
+	onColorChange,
 }: ServerSpaceItemProps) {
 	const [isEditingDirectory, setIsEditingDirectory] = useState(false);
 	const [directoryValue, setDirectoryValue] = useState(directory ?? "");
@@ -272,15 +291,21 @@ export function ServerSpaceItem({
 			<ContextMenuTrigger asChild>
 				<div
 					className={cn(
-						"relative flex w-full items-center pl-6 pr-2 text-left text-sm transition-colors group hover:bg-muted/50",
+						"relative flex w-full items-start pl-6 pr-2 text-left text-sm transition-colors group hover:bg-muted/50",
 						isActive && "bg-muted",
 					)}
 				>
 					{isActive && (
-						<div className="absolute top-0 bottom-0 left-0 w-0.5 rounded-r bg-foreground" />
+						<div
+							className="absolute top-0 bottom-0 left-0 w-0.5 rounded-r bg-foreground"
+							style={color ? { backgroundColor: color } : undefined}
+						/>
 					)}
 
-					<LayoutGrid className="size-3.5 mr-1.5 shrink-0 text-muted-foreground" />
+					<SquareTerminal
+							className="mt-2.5 size-4 mr-2 shrink-0 text-muted-foreground"
+							style={color ? { color } : undefined}
+						/>
 
 					<div className="flex min-w-0 flex-1 items-start gap-1.5 py-2">
 						{isEditingDirectory ? (
@@ -339,11 +364,8 @@ export function ServerSpaceItem({
 									className="h-7 px-1 py-0 text-[13px] -ml-1"
 								/>
 								{directory && (
-									<span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground leading-tight">
-										<FolderOpen className="size-3 shrink-0" />
-										<span className="truncate">
-											{shortenDirectory(directory)}
-										</span>
+									<span className="truncate text-xs text-muted-foreground leading-tight">
+										{shortenDirectory(directory)}
 									</span>
 								)}
 							</div>
@@ -368,11 +390,8 @@ export function ServerSpaceItem({
 									{label}
 								</span>
 								{directory && (
-									<span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground leading-tight">
-										<FolderOpen className="size-3 shrink-0" />
-										<span className="truncate">
-											{shortenDirectory(directory)}
-										</span>
+									<span className="truncate text-xs text-muted-foreground leading-tight">
+										{shortenDirectory(directory)}
 									</span>
 								)}
 							</button>
@@ -421,6 +440,39 @@ export function ServerSpaceItem({
 						Clear Directory
 					</ContextMenuItem>
 				)}
+				<ContextMenuSeparator />
+				<ContextMenuSub>
+					<ContextMenuSubTrigger>
+						<Palette className="mr-2 size-4" />
+						Color
+					</ContextMenuSubTrigger>
+					<ContextMenuSubContent>
+						<div className="grid grid-cols-5 gap-1 p-1.5">
+							{SPACE_COLORS.map((c) => (
+								<button
+									key={c.value}
+									type="button"
+									onClick={() => onColorChange(c.value)}
+									className={cn(
+										"size-5 rounded-full transition-transform hover:scale-110",
+										color === c.value && "ring-2 ring-foreground ring-offset-1 ring-offset-background",
+									)}
+									style={{ backgroundColor: c.value }}
+									title={c.name}
+								/>
+							))}
+						</div>
+						{color && (
+							<>
+								<ContextMenuSeparator />
+								<ContextMenuItem onSelect={() => onColorChange(null)}>
+									<HiMiniXMark className="mr-2 size-4" />
+									Remove Color
+								</ContextMenuItem>
+							</>
+						)}
+					</ContextMenuSubContent>
+				</ContextMenuSub>
 			</ContextMenuContent>
 		</ContextMenu>
 	);

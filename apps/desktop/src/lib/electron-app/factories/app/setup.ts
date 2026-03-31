@@ -61,6 +61,7 @@ PLATFORM.IS_LINUX && app.disableHardwareAcceleration();
 // macOS Sequoia+: occluded window throttling can corrupt GPU compositor layers
 if (PLATFORM.IS_MAC) {
 	app.commandLine.appendSwitch("disable-backgrounding-occluded-windows");
+	app.commandLine.appendSwitch("disable-features", "MacWebContentsOcclusion");
 }
 
 PLATFORM.IS_WINDOWS &&

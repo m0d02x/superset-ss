@@ -1,3 +1,4 @@
+import { Spinner } from "@superset/ui/spinner";
 import {
 	createContext,
 	type ReactNode,
@@ -10,6 +11,8 @@ import { env } from "renderer/env.renderer";
 import { authClient } from "renderer/lib/auth-client";
 import { MOCK_ORG_ID } from "shared/constants";
 import { getCollections, preloadCollections } from "./collections";
+
+const BOOTSTRAP_ORG_ID = "__bootstrap__";
 
 type CollectionsContextType = ReturnType<typeof getCollections> & {
 	switchOrganization: (organizationId: string) => Promise<void>;
@@ -55,12 +58,14 @@ export function CollectionsProvider({ children }: { children: ReactNode }) {
 		preloadActiveOrganizationCollections(activeOrganizationId);
 	}, [activeOrganizationId]);
 
-	const collections = activeOrganizationId
-		? getCollections(activeOrganizationId)
-		: null;
+	const collections = getCollections(activeOrganizationId ?? BOOTSTRAP_ORG_ID);
 
-	if (!collections || isSwitching) {
-		return null;
+	if (isSwitching) {
+		return (
+			<div className="flex h-screen w-screen items-center justify-center bg-background">
+				<Spinner className="size-5" />
+			</div>
+		);
 	}
 
 	return (

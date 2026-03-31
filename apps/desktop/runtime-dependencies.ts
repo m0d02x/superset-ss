@@ -65,11 +65,22 @@ const externalizedRuntimeModules: ExternalizedRuntimeModule[] = [
 	},
 	{
 		specifier: "ssh2",
-		materialize: ["ssh2"],
-		packagedCopies: [copyWholeModule("ssh2"), copyWholeModule("cpu-features")],
+		materialize: ["ssh2", "asn1", "safer-buffer", "bcrypt-pbkdf", "tweetnacl"],
+		packagedCopies: [
+			copyWholeModule("ssh2"),
+			copyWholeModule("cpu-features"),
+			copyWholeModule("asn1"),
+			copyWholeModule("safer-buffer"),
+			copyWholeModule("bcrypt-pbkdf"),
+			copyWholeModule("tweetnacl"),
+		],
 		asarUnpackGlobs: [
 			"**/node_modules/ssh2/**/*",
 			"**/node_modules/cpu-features/**/*",
+			"**/node_modules/asn1/**/*",
+			"**/node_modules/safer-buffer/**/*",
+			"**/node_modules/bcrypt-pbkdf/**/*",
+			"**/node_modules/tweetnacl/**/*",
 		],
 	},
 	{

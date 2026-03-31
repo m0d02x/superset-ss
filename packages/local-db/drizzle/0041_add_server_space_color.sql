@@ -1,0 +1,1 @@
+ALTER TABLE `server_spaces` ADD `color` text;

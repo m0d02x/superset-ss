@@ -46,12 +46,9 @@ void applyShellEnvToProcess().catch((error) => {
 	console.error("[main] Failed to apply shell environment:", error);
 });
 
-// Dev mode: label the app with the workspace name so multiple worktrees are distinguishable
+// Dev mode: set app name
 if (IS_DEV) {
-	const workspaceName = resolveDevWorkspaceName();
-	if (workspaceName) {
-		app.setName(`Superset (${workspaceName})`);
-	}
+	app.setName("Hyperset");
 }
 
 // Dev mode: register with execPath + app script so macOS launches Electron with our entry point
@@ -295,7 +292,7 @@ if (!gotTheLock) {
 		};
 		protocol.handle("superset-icon", iconProtocolHandler);
 		session
-			.fromPartition("persist:superset")
+			.fromPartition("persist:hyperset")
 			.protocol.handle("superset-icon", iconProtocolHandler);
 
 		// Serve system fonts (e.g. SF Mono on macOS) via custom protocol
@@ -324,7 +321,7 @@ if (!gotTheLock) {
 			};
 			protocol.handle("superset-font", fontProtocolHandler);
 			session
-				.fromPartition("persist:superset")
+				.fromPartition("persist:hyperset")
 				.protocol.handle("superset-font", fontProtocolHandler);
 		}
 

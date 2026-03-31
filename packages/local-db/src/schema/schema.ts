@@ -432,3 +432,32 @@ export const servers = sqliteTable(
 
 export type InsertServer = typeof servers.$inferInsert;
 export type SelectServer = typeof servers.$inferSelect;
+
+/**
+ * Server spaces - named workspace spaces within a server (persisted)
+ */
+export const serverSpaces = sqliteTable(
+	"server_spaces",
+	{
+		id: text("id")
+			.primaryKey()
+			.$defaultFn(() => uuidv4()),
+		serverId: text("server_id")
+			.notNull()
+			.references(() => servers.id, { onDelete: "cascade" }),
+		label: text("label").notNull(),
+		directory: text("directory"),
+		color: text("color"),
+		sortOrder: integer("sort_order").notNull().default(0),
+		createdAt: integer("created_at")
+			.notNull()
+			.$defaultFn(() => Date.now()),
+		updatedAt: integer("updated_at")
+			.notNull()
+			.$defaultFn(() => Date.now()),
+	},
+	(table) => [index("server_spaces_server_id_idx").on(table.serverId)],
+);
+
+export type InsertServerSpace = typeof serverSpaces.$inferInsert;
+export type SelectServerSpace = typeof serverSpaces.$inferSelect;

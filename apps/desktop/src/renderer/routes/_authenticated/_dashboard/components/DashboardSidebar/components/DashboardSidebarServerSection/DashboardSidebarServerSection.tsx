@@ -145,6 +145,13 @@ function ServerGroup({ server }: ServerGroupProps) {
 		updateSpaceMutation.mutate({ id: spaceId, label: trimmed });
 	};
 
+	const handleSpaceColorChange = (
+		spaceId: string,
+		color: string | null,
+	) => {
+		updateSpaceMutation.mutate({ id: spaceId, color });
+	};
+
 	const handleToggleCollapse = () => {
 		toggleServerCollapsed(server.id);
 	};
@@ -192,6 +199,7 @@ function ServerGroup({ server }: ServerGroupProps) {
 									spaceId={space.id}
 									label={space.label}
 									directory={space.directory ?? undefined}
+									color={space.color ?? undefined}
 									isActive={selectedSpaceId === space.id}
 									onSelect={() => handleSpaceSelect(space.id)}
 									onClose={() => handleSpaceClose(space.id)}
@@ -199,6 +207,9 @@ function ServerGroup({ server }: ServerGroupProps) {
 										handleSpaceDirectoryChange(space.id, directory)
 									}
 									onRename={(label) => handleSpaceRename(space.id, label)}
+									onColorChange={(color) =>
+										handleSpaceColorChange(space.id, color)
+									}
 								/>
 							))}
 						</div>

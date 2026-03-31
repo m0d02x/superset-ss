@@ -48,7 +48,15 @@ function createPortDeferred(): {
 export class HostServiceManager {
 	private instances = new Map<string, HostServiceProcess>();
 	private pendingStarts = new Map<string, PendingStart>();
-	private scriptPath = path.join(__dirname, "host-service.js");
+	private scriptPath = app.isPackaged
+		? path.join(
+				process.resourcesPath,
+				"app.asar",
+				"dist",
+				"main",
+				"host-service.js",
+			)
+		: path.join(__dirname, "host-service.js");
 	private authToken: string | null = null;
 	private cloudApiUrl: string | null = null;
 

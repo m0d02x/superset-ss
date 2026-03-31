@@ -184,8 +184,8 @@ export function main() {
 		process.exit(0);
 	}
 
-	const PROTOCOL_SCHEME = `superset-${workspaceName}`;
-	const BUNDLE_ID = `com.superset.desktop.${workspaceName}`;
+	const PROTOCOL_SCHEME = `hyperset-${workspaceName}`;
+	const BUNDLE_ID = `com.hyperset.desktop.${workspaceName}`;
 	const ELECTRON_DIST_DIR = resolve(
 		import.meta.dirname,
 		"../node_modules/electron/dist",
@@ -198,7 +198,7 @@ export function main() {
 		process.exit(0);
 	}
 
-	const DISPLAY_NAME = `Superset (${bundleDisplayWorkspaceName})`;
+	const DISPLAY_NAME = `Hyperset (${bundleDisplayWorkspaceName})`;
 
 	try {
 		const currentBundleId = execSync(
@@ -277,7 +277,7 @@ export function main() {
 	const commands = [
 		`Add :CFBundleURLTypes array`,
 		`Add :CFBundleURLTypes:0 dict`,
-		`Add :CFBundleURLTypes:0:CFBundleURLName string 'Superset Dev'`,
+		`Add :CFBundleURLTypes:0:CFBundleURLName string 'Hyperset Dev'`,
 		`Add :CFBundleURLTypes:0:CFBundleURLSchemes array`,
 		`Add :CFBundleURLTypes:0:CFBundleURLSchemes:0 string '${PROTOCOL_SCHEME}'`,
 		`Add :CFBundleURLTypes:0:CFBundleTypeRole string 'Editor'`,

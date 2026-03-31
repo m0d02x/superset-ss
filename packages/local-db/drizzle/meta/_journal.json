@@ -281,6 +281,20 @@
       "when": 1774664169992,
       "tag": "0039_add_remote_project_fields",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "6",
+      "when": 1774795827250,
+      "tag": "0040_add_server_spaces",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "6",
+      "when": 1774801196011,
+      "tag": "0041_add_server_space_color",
+      "breakpoints": true
     }
   ]
 }
