@@ -3,6 +3,7 @@ import { useCallback } from "react";
 import { electronTrpc } from "renderer/lib/electron-trpc";
 import { navigateToWorkspace } from "renderer/routes/_authenticated/_dashboard/utils/workspace-navigation";
 import { useAppHotkey } from "renderer/stores/hotkeys";
+import { useWorkspaceJumpHotkeysEnabled } from "./useWorkspaceJumpHotkeysEnabled";
 
 /**
  * Shared hook for workspace keyboard shortcuts.
@@ -14,6 +15,7 @@ export function useWorkspaceShortcuts() {
 	const { data: groups = [] } =
 		electronTrpc.workspaces.getAllGrouped.useQuery();
 	const navigate = useNavigate();
+	const workspaceHotkeysEnabled = useWorkspaceJumpHotkeysEnabled();
 
 	const allWorkspaces = groups.flatMap((group) => {
 		const topLevelWorkspacesById = new Map(
@@ -43,33 +45,60 @@ export function useWorkspaceShortcuts() {
 		[allWorkspaces, navigate],
 	);
 
-	useAppHotkey("JUMP_TO_WORKSPACE_1", () => switchToWorkspace(0), undefined, [
-		switchToWorkspace,
-	]);
-	useAppHotkey("JUMP_TO_WORKSPACE_2", () => switchToWorkspace(1), undefined, [
-		switchToWorkspace,
-	]);
-	useAppHotkey("JUMP_TO_WORKSPACE_3", () => switchToWorkspace(2), undefined, [
-		switchToWorkspace,
-	]);
-	useAppHotkey("JUMP_TO_WORKSPACE_4", () => switchToWorkspace(3), undefined, [
-		switchToWorkspace,
-	]);
-	useAppHotkey("JUMP_TO_WORKSPACE_5", () => switchToWorkspace(4), undefined, [
-		switchToWorkspace,
-	]);
-	useAppHotkey("JUMP_TO_WORKSPACE_6", () => switchToWorkspace(5), undefined, [
-		switchToWorkspace,
-	]);
-	useAppHotkey("JUMP_TO_WORKSPACE_7", () => switchToWorkspace(6), undefined, [
-		switchToWorkspace,
-	]);
-	useAppHotkey("JUMP_TO_WORKSPACE_8", () => switchToWorkspace(7), undefined, [
-		switchToWorkspace,
-	]);
-	useAppHotkey("JUMP_TO_WORKSPACE_9", () => switchToWorkspace(8), undefined, [
-		switchToWorkspace,
-	]);
+	useAppHotkey(
+		"JUMP_TO_WORKSPACE_1",
+		() => switchToWorkspace(0),
+		{ enabled: workspaceHotkeysEnabled },
+		[switchToWorkspace, workspaceHotkeysEnabled],
+	);
+	useAppHotkey(
+		"JUMP_TO_WORKSPACE_2",
+		() => switchToWorkspace(1),
+		{ enabled: workspaceHotkeysEnabled },
+		[switchToWorkspace, workspaceHotkeysEnabled],
+	);
+	useAppHotkey(
+		"JUMP_TO_WORKSPACE_3",
+		() => switchToWorkspace(2),
+		{ enabled: workspaceHotkeysEnabled },
+		[switchToWorkspace, workspaceHotkeysEnabled],
+	);
+	useAppHotkey(
+		"JUMP_TO_WORKSPACE_4",
+		() => switchToWorkspace(3),
+		{ enabled: workspaceHotkeysEnabled },
+		[switchToWorkspace, workspaceHotkeysEnabled],
+	);
+	useAppHotkey(
+		"JUMP_TO_WORKSPACE_5",
+		() => switchToWorkspace(4),
+		{ enabled: workspaceHotkeysEnabled },
+		[switchToWorkspace, workspaceHotkeysEnabled],
+	);
+	useAppHotkey(
+		"JUMP_TO_WORKSPACE_6",
+		() => switchToWorkspace(5),
+		{ enabled: workspaceHotkeysEnabled },
+		[switchToWorkspace, workspaceHotkeysEnabled],
+	);
+	useAppHotkey(
+		"JUMP_TO_WORKSPACE_7",
+		() => switchToWorkspace(6),
+		{ enabled: workspaceHotkeysEnabled },
+		[switchToWorkspace, workspaceHotkeysEnabled],
+	);
+	useAppHotkey(
+		"JUMP_TO_WORKSPACE_8",
+		() => switchToWorkspace(7),
+		{ enabled: workspaceHotkeysEnabled },
+		[switchToWorkspace, workspaceHotkeysEnabled],
+	);
+	useAppHotkey(
+		"JUMP_TO_WORKSPACE_9",
+		() => switchToWorkspace(8),
+		{ enabled: workspaceHotkeysEnabled },
+		[switchToWorkspace, workspaceHotkeysEnabled],
+	);
 
 	return {
 		groups,

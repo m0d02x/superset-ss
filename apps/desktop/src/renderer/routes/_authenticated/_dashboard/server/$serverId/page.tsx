@@ -14,6 +14,10 @@ import { LuPanelRight } from "react-icons/lu";
 import { electronTrpc } from "renderer/lib/electron-trpc";
 import { useAppHotkey } from "renderer/stores/hotkeys";
 import {
+	buildRemoteSessionKey,
+	useRemoteSessionsStore,
+} from "renderer/stores/remote-sessions";
+import {
 	type ServerTerminal,
 	useServersStore,
 } from "renderer/stores/servers-state";
@@ -60,14 +64,29 @@ function ServerPage() {
 	const { serverId } = Route.useParams();
 	const { space: spaceId, tab: tabParam } = Route.useSearch();
 	const navigate = Route.useNavigate();
+	const utils = electronTrpc.useUtils();
 	const { data: server } = electronTrpc.servers.get.useQuery(
 		{ id: serverId },
 		{ refetchInterval: 2000 },
 	);
 
+	electronTrpc.servers.onStatusChange.useSubscription(undefined, {
+		onData: (event) => {
+			if (event.serverId !== serverId) {
+				return;
+			}
+
+			utils.servers.get.invalidate({ id: serverId });
+			utils.servers.list.invalidate();
+		},
+	});
+
 	const { data: spaces = [] } = electronTrpc.servers.listSpaces.useQuery(
 		{ serverId },
 		{ refetchOnWindowFocus: false },
+	);
+	const destroySession = useRemoteSessionsStore(
+		(state) => state.destroySession,
 	);
 
 	const {
@@ -85,72 +104,80 @@ function ServerPage() {
 	} = useServersStore();
 
 	const execMutation = electronTrpc.servers.exec.useMutation();
+	const execServerCommand = execMutation.mutateAsync;
 	const restoredSpacesRef = useRef<Set<string>>(new Set());
 	const explicitTitlesRef = useRef<Set<string>>(new Set());
 
 	// Restore tabs from existing tmux sessions on the server
 	useEffect(() => {
-		if (!spaceId || !server || server.status !== "connected") return;
+		if (!spaceId || server?.status !== "connected") return;
 		if (restoredSpacesRef.current.has(spaceId)) return;
 		restoredSpacesRef.current.add(spaceId);
 
 		const prefix = `ss-${spaceId}-term-`;
-		execMutation
-			.mutateAsync({
-				id: serverId,
-				command:
-					"tmux list-sessions -F '#{session_name}:#{session_activity}:#{pane_title}' 2>/dev/null || true",
-			})
-			.then((result) => {
-				if (result.code !== 0 || !result.stdout.trim()) return;
+		execServerCommand({
+			id: serverId,
+			command:
+				"tmux list-sessions -F '#{session_name}:#{session_activity}:#{pane_title}' 2>/dev/null || true",
+		}).then((result) => {
+			if (result.code !== 0 || !result.stdout.trim()) return;
 
-				const allLines = result.stdout
-					.split("\n")
-					.map((s) => s.trim())
-					.filter((s) => s.startsWith(prefix));
+			const allLines = result.stdout
+				.split("\n")
+				.map((s) => s.trim())
+				.filter((s) => s.startsWith(prefix));
 
-				if (allLines.length === 0) return;
+			if (allLines.length === 0) return;
 
-				const allSessions = allLines.map((s) => {
-					const firstColon = s.indexOf(":", prefix.length);
-					const secondColon = s.indexOf(":", firstColon + 1);
-					const sessionName = firstColon >= 0 ? s.slice(0, firstColon) : s;
-					const activity = firstColon >= 0 && secondColon >= 0
+			const allSessions = allLines.map((s) => {
+				const firstColon = s.indexOf(":", prefix.length);
+				const secondColon = s.indexOf(":", firstColon + 1);
+				const sessionName = firstColon >= 0 ? s.slice(0, firstColon) : s;
+				const activity =
+					firstColon >= 0 && secondColon >= 0
 						? Number.parseInt(s.slice(firstColon + 1, secondColon), 10)
 						: 0;
-					const paneTitle = secondColon >= 0 ? s.slice(secondColon + 1).trim() : "";
-					const id = sessionName.slice(`ss-${spaceId}-`.length);
-					return { id, sessionName, activity, paneTitle };
-				});
-
-				// Sort by activity (most recent first), keep top 5, kill the rest
-				const MAX_RESTORED_TABS = 5;
-				allSessions.sort((a, b) => b.activity - a.activity);
-				const toRestore = allSessions.slice(0, MAX_RESTORED_TABS);
-				const toKill = allSessions.slice(MAX_RESTORED_TABS);
-
-				if (toKill.length > 0) {
-					const killCmd = toKill
-						.map((s) => `tmux kill-session -t '${s.sessionName}'`)
-						.join(" ; ");
-					execMutation.mutateAsync({
-						id: serverId,
-						command: `${killCmd} 2>/dev/null || true`,
-					});
-				}
-
-				const ids = toRestore.map(({ id }) => id);
-				restoreTerminalsForSpace(spaceId, ids);
-
-				// Apply tmux pane titles to restored tabs
-				for (const { id, paneTitle } of toRestore) {
-					if (paneTitle) {
-						setTerminalLabel(spaceId, id, paneTitle);
-						explicitTitlesRef.current.add(id);
-					}
-				}
+				const paneTitle =
+					secondColon >= 0 ? s.slice(secondColon + 1).trim() : "";
+				const id = sessionName.slice(`ss-${spaceId}-`.length);
+				return { id, sessionName, activity, paneTitle };
 			});
-	}, [serverId, spaceId, server?.status]);
+
+			// Sort by activity (most recent first), keep top 5, kill the rest
+			const MAX_RESTORED_TABS = 5;
+			allSessions.sort((a, b) => b.activity - a.activity);
+			const toRestore = allSessions.slice(0, MAX_RESTORED_TABS);
+			const toKill = allSessions.slice(MAX_RESTORED_TABS);
+
+			if (toKill.length > 0) {
+				const killCmd = toKill
+					.map((s) => `tmux kill-session -t '${s.sessionName}'`)
+					.join(" ; ");
+				execServerCommand({
+					id: serverId,
+					command: `${killCmd} 2>/dev/null || true`,
+				});
+			}
+
+			const ids = toRestore.map(({ id }) => id);
+			restoreTerminalsForSpace(spaceId, ids);
+
+			// Apply tmux pane titles to restored tabs
+			for (const { id, paneTitle } of toRestore) {
+				if (paneTitle) {
+					setTerminalLabel(spaceId, id, paneTitle);
+					explicitTitlesRef.current.add(id);
+				}
+			}
+		});
+	}, [
+		execServerCommand,
+		restoreTerminalsForSpace,
+		server,
+		serverId,
+		setTerminalLabel,
+		spaceId,
+	]);
 
 	useEffect(() => {
 		setSelectedSpace(spaceId || null);
@@ -239,47 +266,50 @@ function ServerPage() {
 
 	// Fetch tmux sessions when dropdown opens — scoped to current space
 	useEffect(() => {
-		if (!tmuxDropdownOpen || !spaceId || !server || server.status !== "connected") return;
+		if (!tmuxDropdownOpen || !spaceId || server?.status !== "connected") return;
 
 		// Sessions already shown as tabs in this space
 		const currentSpaceTabs = new Set(
-			(spaceTerminals[spaceId] || []).map(
-				(t) => `ss-${spaceId}-${t.id}`,
-			),
+			(spaceTerminals[spaceId] || []).map((t) => `ss-${spaceId}-${t.id}`),
 		);
 
-		execMutation
-			.mutateAsync({
-				id: serverId,
-				command:
-					"tmux list-sessions -F '#{session_name}:#{session_attached}:#{pane_title}' 2>/dev/null || true",
-			})
-			.then((result) => {
-				if (result.code !== 0 || !result.stdout.trim()) {
-					setTmuxSessions([]);
-					return;
-				}
+		execServerCommand({
+			id: serverId,
+			command:
+				"tmux list-sessions -F '#{session_name}:#{session_attached}:#{pane_title}' 2>/dev/null || true",
+		}).then((result) => {
+			if (result.code !== 0 || !result.stdout.trim()) {
+				setTmuxSessions([]);
+				return;
+			}
 
-				const sessions = result.stdout
-					.split("\n")
-					.map((line) => line.trim())
-					.filter(Boolean)
-					.map((line) => {
-						const firstColon = line.indexOf(":");
-						const secondColon = line.indexOf(":", firstColon + 1);
-						const name = line.slice(0, firstColon);
-						const attached = line.slice(firstColon + 1, secondColon) === "1";
-						const title = line.slice(secondColon + 1).trim();
-						return { name, title, attached };
-					})
-					.filter((s) => {
-						// Only show non-Hyperset sessions (manually created tmux)
-						return !s.name.startsWith("ss-");
-					});
+			const sessions = result.stdout
+				.split("\n")
+				.map((line) => line.trim())
+				.filter(Boolean)
+				.map((line) => {
+					const firstColon = line.indexOf(":");
+					const secondColon = line.indexOf(":", firstColon + 1);
+					const name = line.slice(0, firstColon);
+					const attached = line.slice(firstColon + 1, secondColon) === "1";
+					const title = line.slice(secondColon + 1).trim();
+					return { name, title, attached };
+				})
+				.filter((s) => {
+					// Only show non-Hyperset sessions (manually created tmux)
+					return !s.name.startsWith("ss-");
+				});
 
-				setTmuxSessions(sessions);
-			});
-	}, [tmuxDropdownOpen, serverId, spaceId, server?.status, spaceTerminals]);
+			setTmuxSessions(sessions);
+		});
+	}, [
+		execServerCommand,
+		server,
+		serverId,
+		spaceId,
+		spaceTerminals,
+		tmuxDropdownOpen,
+	]);
 
 	const handleAttachTmux = useCallback(
 		(sessionName: string, sessionTitle: string) => {
@@ -292,10 +322,7 @@ function ServerPage() {
 			}
 			// Override the tmux session name for this terminal
 			// We store it so acquireSession uses the external session name
-			tmuxOverridesRef.current.set(
-				`${spaceId}:${terminal.id}`,
-				sessionName,
-			);
+			tmuxOverridesRef.current.set(`${spaceId}:${terminal.id}`, sessionName);
 			navigate({
 				search: { space: spaceId, tab: terminal.id },
 			});
@@ -338,6 +365,13 @@ function ServerPage() {
 				return;
 			}
 
+			destroySession(
+				buildRemoteSessionKey({
+					serverId,
+					terminalId,
+				}),
+			);
+
 			const wasActive = activeTabId === terminalId;
 			removeTerminalFromSpace(spaceId, terminalId);
 
@@ -354,12 +388,31 @@ function ServerPage() {
 		},
 		[
 			activeTabId,
+			destroySession,
 			navigate,
 			removeTerminalFromSpace,
+			serverId,
 			setSelectedTerminalForSpace,
 			spaceId,
 			tabs,
 		],
+	);
+
+	const switchToTerminal = useCallback(
+		(index: number) => {
+			if (!spaceId) {
+				return;
+			}
+
+			const terminal = tabs[index];
+			if (!terminal) {
+				return;
+			}
+
+			setSelectedTerminalForSpace(spaceId, terminal.id);
+			navigate({ search: { space: spaceId, tab: terminal.id } });
+		},
+		[navigate, setSelectedTerminalForSpace, spaceId, tabs],
 	);
 
 	useAppHotkey(
@@ -386,6 +439,78 @@ function ServerPage() {
 		},
 		{ preventDefault: true },
 		[setIsSidebarOpen],
+	);
+	useAppHotkey(
+		"JUMP_TO_TAB_1",
+		() => {
+			switchToTerminal(0);
+		},
+		{ preventDefault: true },
+		[switchToTerminal],
+	);
+	useAppHotkey(
+		"JUMP_TO_TAB_2",
+		() => {
+			switchToTerminal(1);
+		},
+		{ preventDefault: true },
+		[switchToTerminal],
+	);
+	useAppHotkey(
+		"JUMP_TO_TAB_3",
+		() => {
+			switchToTerminal(2);
+		},
+		{ preventDefault: true },
+		[switchToTerminal],
+	);
+	useAppHotkey(
+		"JUMP_TO_TAB_4",
+		() => {
+			switchToTerminal(3);
+		},
+		{ preventDefault: true },
+		[switchToTerminal],
+	);
+	useAppHotkey(
+		"JUMP_TO_TAB_5",
+		() => {
+			switchToTerminal(4);
+		},
+		{ preventDefault: true },
+		[switchToTerminal],
+	);
+	useAppHotkey(
+		"JUMP_TO_TAB_6",
+		() => {
+			switchToTerminal(5);
+		},
+		{ preventDefault: true },
+		[switchToTerminal],
+	);
+	useAppHotkey(
+		"JUMP_TO_TAB_7",
+		() => {
+			switchToTerminal(6);
+		},
+		{ preventDefault: true },
+		[switchToTerminal],
+	);
+	useAppHotkey(
+		"JUMP_TO_TAB_8",
+		() => {
+			switchToTerminal(7);
+		},
+		{ preventDefault: true },
+		[switchToTerminal],
+	);
+	useAppHotkey(
+		"JUMP_TO_TAB_9",
+		() => {
+			switchToTerminal(8);
+		},
+		{ preventDefault: true },
+		[switchToTerminal],
 	);
 
 	const useGhostty = useGhosttyEnabled();
@@ -441,9 +566,11 @@ function ServerPage() {
 				<div className="flex shrink-0 items-center border-b border-border bg-muted/30 h-10">
 					<div className="flex h-full flex-1 items-center overflow-x-auto hide-scrollbar">
 						{tabs.map((tab) => (
-							<button
+							<div
 								key={tab.id}
-								type="button"
+								role="tab"
+								aria-selected={activeTabId === tab.id}
+								tabIndex={0}
 								className={`group flex h-full shrink-0 items-center gap-1.5 border-r border-border px-3 text-xs transition-colors ${
 									activeTabId === tab.id
 										? "bg-background text-foreground"
@@ -451,6 +578,12 @@ function ServerPage() {
 								}`}
 								onClick={() => {
 									navigate({ search: { space: spaceId, tab: tab.id } });
+								}}
+								onKeyDown={(event) => {
+									if (event.key === "Enter" || event.key === " ") {
+										event.preventDefault();
+										navigate({ search: { space: spaceId, tab: tab.id } });
+									}
 								}}
 							>
 								<span className="max-w-48 truncate">{tab.label}</span>
@@ -465,12 +598,12 @@ function ServerPage() {
 								>
 									<X className="size-3" />
 								</button>
-							</button>
+							</div>
 						))}
 					</div>
 
 					<div className="flex shrink-0 items-center gap-0.5 px-2">
-<DropdownMenu
+						<DropdownMenu
 							open={tmuxDropdownOpen}
 							onOpenChange={setTmuxDropdownOpen}
 						>
@@ -575,7 +708,9 @@ function ServerPage() {
 										spaceId={sid}
 										cwd={terminalCwds[tab.id]}
 										isActive={isVisible}
-										tmuxSession={tmuxOverridesRef.current.get(`${sid}:${tab.id}`)}
+										tmuxSession={tmuxOverridesRef.current.get(
+											`${sid}:${tab.id}`,
+										)}
 										onCwdChange={(cwd) => {
 											setTerminalCwd(tab.id, cwd);
 											if (!explicitTitlesRef.current.has(tab.id)) {

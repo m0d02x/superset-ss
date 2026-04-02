@@ -16,6 +16,68 @@ import { getSSHConnectionManager } from "main/lib/ssh-connection-manager";
 import { z } from "zod";
 import { publicProcedure, router } from "../..";
 
+let hasRegisteredServerStatusPersistence = false;
+
+function persistServerStatus(event: {
+	serverId: string;
+	status: SelectServer["status"];
+	message?: string;
+}): void {
+	const existingServer = localDb
+		.select({ id: servers.id })
+		.from(servers)
+		.where(eq(servers.id, event.serverId))
+		.get();
+
+	if (!existingServer) {
+		return;
+	}
+
+	localDb
+		.update(servers)
+		.set({
+			status: event.status,
+			statusMessage: event.message ?? null,
+			lastConnectedAt: event.status === "connected" ? Date.now() : undefined,
+			updatedAt: Date.now(),
+		})
+		.where(eq(servers.id, event.serverId))
+		.run();
+}
+
+async function reconnectServer(serverId: string): Promise<void> {
+	const server = localDb
+		.select()
+		.from(servers)
+		.where(eq(servers.id, serverId))
+		.get();
+
+	if (!server) {
+		throw new Error(`Server not found: ${serverId}`);
+	}
+
+	const manager = getSSHConnectionManager();
+	await manager.connect({
+		serverId: server.id,
+		host: server.host,
+		port: server.port,
+		username: server.username,
+		authMethod: server.authMethod,
+		sshKeyPath: server.sshKeyPath ?? undefined,
+	});
+}
+
+function shouldForceReconnect(error: unknown): boolean {
+	if (!(error instanceof Error)) {
+		return false;
+	}
+
+	return (
+		error.message.includes("Not connected to server") ||
+		error.message.includes("Channel open failure")
+	);
+}
+
 const createServerInput = z.object({
 	label: z.string().min(1),
 	host: z.string().min(1),
@@ -36,6 +98,12 @@ const updateServerInput = z.object({
 });
 
 export const createServersRouter = () => {
+	if (!hasRegisteredServerStatusPersistence) {
+		const manager = getSSHConnectionManager();
+		manager.on("statusChange", persistServerStatus);
+		hasRegisteredServerStatusPersistence = true;
+	}
+
 	return router({
 		list: publicProcedure.query(() => {
 			return localDb.select().from(servers).all();
@@ -90,16 +158,6 @@ export const createServersRouter = () => {
 		connect: publicProcedure
 			.input(z.object({ id: z.string() }))
 			.mutation(async ({ input }) => {
-				const server = localDb
-					.select()
-					.from(servers)
-					.where(eq(servers.id, input.id))
-					.get();
-
-				if (!server) {
-					throw new Error(`Server not found: ${input.id}`);
-				}
-
 				localDb
 					.update(servers)
 					.set({
@@ -111,26 +169,8 @@ export const createServersRouter = () => {
 					.run();
 
 				try {
+					await reconnectServer(input.id);
 					const manager = getSSHConnectionManager();
-					await manager.connect({
-						serverId: server.id,
-						host: server.host,
-						port: server.port,
-						username: server.username,
-						authMethod: server.authMethod,
-						sshKeyPath: server.sshKeyPath ?? undefined,
-					});
-
-					localDb
-						.update(servers)
-						.set({
-							status: "connected",
-							statusMessage: null,
-							lastConnectedAt: Date.now(),
-							updatedAt: Date.now(),
-						})
-						.where(eq(servers.id, input.id))
-						.run();
 
 					// Auto-sync worktrees for all remote projects on this server
 					const remoteProjects = localDb
@@ -325,28 +365,13 @@ export const createServersRouter = () => {
 			for (const server of allServers) {
 				// Only reconnect servers that were previously connected
 				if (!server.lastConnectedAt) continue;
-				if (manager.isConnected(server.id)) continue;
 
 				try {
-					await manager.connect({
-						serverId: server.id,
-						host: server.host,
-						port: server.port,
-						username: server.username,
-						authMethod: server.authMethod,
-						sshKeyPath: server.sshKeyPath ?? undefined,
-					});
+					if (manager.isConnected(server.id)) {
+						manager.disconnect(server.id);
+					}
 
-					localDb
-						.update(servers)
-						.set({
-							status: "connected",
-							statusMessage: null,
-							lastConnectedAt: Date.now(),
-							updatedAt: Date.now(),
-						})
-						.where(eq(servers.id, server.id))
-						.run();
+					await reconnectServer(server.id);
 
 					results.push({ id: server.id, success: true });
 				} catch (error) {
@@ -506,12 +531,27 @@ export const createServersRouter = () => {
 			)
 			.mutation(async ({ input }) => {
 				const manager = getSSHConnectionManager();
-				const sessionId = await manager.openShell(input.serverId, {
+				const shellOptions = {
 					cols: input.cols,
 					rows: input.rows,
 					cwd: input.cwd,
 					tmuxSession: input.tmuxSession,
-				});
+				};
+
+				let sessionId: string;
+
+				try {
+					sessionId = await manager.openShell(input.serverId, shellOptions);
+				} catch (error) {
+					if (!shouldForceReconnect(error)) {
+						throw error;
+					}
+
+					manager.disconnect(input.serverId);
+					await reconnectServer(input.serverId);
+					sessionId = await manager.openShell(input.serverId, shellOptions);
+				}
+
 				return { sessionId };
 			}),
 
@@ -730,10 +770,7 @@ export const createServersRouter = () => {
 		deleteSpace: publicProcedure
 			.input(z.object({ id: z.string() }))
 			.mutation(({ input }) => {
-				localDb
-					.delete(serverSpaces)
-					.where(eq(serverSpaces.id, input.id))
-					.run();
+				localDb.delete(serverSpaces).where(eq(serverSpaces.id, input.id)).run();
 				return { success: true };
 			}),
 	});

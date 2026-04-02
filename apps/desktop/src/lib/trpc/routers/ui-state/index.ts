@@ -1,6 +1,11 @@
 import { observable } from "@trpc/server/observable";
 import { appState } from "main/lib/app-state";
-import type { TabsState, ThemeState } from "main/lib/app-state/schemas";
+import type {
+	LocalSpace,
+	LocalSpacesState,
+	TabsState,
+	ThemeState,
+} from "main/lib/app-state/schemas";
 import { hotkeysEmitter } from "main/lib/hotkeys-events";
 import {
 	buildOverridesFromBindings,
@@ -245,6 +250,21 @@ const hotkeysStateSchema = z.object({
 	}),
 });
 
+const localSpaceSchema = z.object({
+	id: z.string(),
+	label: z.string(),
+	directory: z.string().optional(),
+	color: z.string().optional(),
+	sortOrder: z.number(),
+	createdAt: z.number(),
+	updatedAt: z.number(),
+	lastOpenedAt: z.number(),
+});
+
+const localSpacesStateSchema = z.object({
+	spaces: z.array(localSpaceSchema),
+});
+
 /**
  * UI State router - manages tabs and theme persistence via lowdb
  */
@@ -332,6 +352,20 @@ export const createUiStateRouter = () => {
 					};
 				});
 			}),
+		}),
+
+		localSpaces: router({
+			get: publicProcedure.query((): LocalSpacesState => {
+				return appState.data.localSpaces;
+			}),
+
+			set: publicProcedure
+				.input(localSpacesStateSchema)
+				.mutation(async ({ input }) => {
+					appState.data.localSpaces = input as LocalSpacesState;
+					await appState.write();
+					return { success: true };
+				}),
 		}),
 	});
 };

@@ -30,6 +30,11 @@ function ensureValidShape(data: Partial<AppState>): AppState {
 				...(data.hotkeysState?.byPlatform ?? {}),
 			},
 		},
+		localSpaces: {
+			...defaultAppState.localSpaces,
+			...(data.localSpaces ?? {}),
+			spaces: data.localSpaces?.spaces ?? defaultAppState.localSpaces.spaces,
+		},
 	};
 }
 

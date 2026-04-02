@@ -37,6 +37,14 @@ export const Route = createFileRoute("/_authenticated")({
 });
 
 function AuthenticatedLayout() {
+	if (env.SKIP_ENV_VALIDATION) {
+		return <SkipModeAuthenticatedLayout />;
+	}
+
+	return <LiveAuthenticatedLayout />;
+}
+
+function LiveAuthenticatedLayout() {
 	const { data: session, isPending, isRefetching } = authClient.useSession();
 	const hasLocalToken = !!getAuthToken();
 	const navigate = useNavigate();
@@ -146,6 +154,94 @@ function AuthenticatedLayout() {
 					<InitGitDialog />
 					<TeardownLogsDialog />
 					<Paywall />
+				</HostServiceProvider>
+			</CollectionsProvider>
+		</DndProvider>
+	);
+}
+
+function SkipModeAuthenticatedLayout() {
+	const navigate = useNavigate();
+	const location = useLocation();
+	const setOriginRoute = useSettingsStore((s) => s.setOriginRoute);
+	const utils = electronTrpc.useUtils();
+	const shownWorkspaceInitWarningsRef = useRef(new Set<string>());
+
+	useUpdateListener();
+	useHotkeysSync();
+
+	electronTrpc.notifications.subscribe.useSubscription(undefined, {
+		onData: (event) => {
+			if (
+				event.type !== NOTIFICATION_EVENTS.TERMINAL_EXIT ||
+				!event.data?.paneId
+			) {
+				return;
+			}
+			const pane = useTabsStore.getState().panes[event.data.paneId];
+			if (pane?.workspaceRun?.state === "running") {
+				const nextState =
+					event.data.reason === "killed"
+						? "stopped-by-user"
+						: "stopped-by-exit";
+				setPaneWorkspaceRunState(event.data.paneId, nextState);
+			}
+		},
+	});
+
+	useEffect(() => {
+		if (!location.pathname.startsWith("/settings")) {
+			setOriginRoute(location.pathname);
+		}
+	}, [location.pathname, setOriginRoute]);
+
+	const updateInitProgress = useWorkspaceInitStore((s) => s.updateProgress);
+	electronTrpc.workspaces.onInitProgress.useSubscription(undefined, {
+		onData: (progress) => {
+			updateInitProgress(progress);
+			if (
+				progress.warning &&
+				!shownWorkspaceInitWarningsRef.current.has(progress.workspaceId)
+			) {
+				shownWorkspaceInitWarningsRef.current.add(progress.workspaceId);
+				showWorkspaceAutoNameWarningToast({
+					description: progress.warning,
+					onOpenModelAuthSettings: () => {
+						void navigate({ to: "/settings/models" });
+					},
+				});
+			}
+			if (progress.step === "ready" || progress.step === "failed") {
+				utils.workspaces.getAllGrouped.invalidate();
+				utils.workspaces.get.invalidate({ id: progress.workspaceId });
+			}
+		},
+		onError: (error) => {
+			console.error("[workspace-init-subscription] Subscription error:", error);
+		},
+	});
+
+	electronTrpc.menu.subscribe.useSubscription(undefined, {
+		onData: (event) => {
+			if (event.type === "open-settings") {
+				const section = event.data.section || "account";
+				navigate({ to: `/settings/${section}` as "/settings/account" });
+			} else if (event.type === "open-workspace") {
+				navigate({ to: `/workspace/${event.data.workspaceId}` });
+			}
+		},
+	});
+
+	return (
+		<DndProvider manager={dragDropManager}>
+			<CollectionsProvider>
+				<HostServiceProvider>
+					<AgentHooks />
+					<Outlet />
+					<WorkspaceInitEffects />
+					<NewWorkspaceModal />
+					<InitGitDialog />
+					<TeardownLogsDialog />
 				</HostServiceProvider>
 			</CollectionsProvider>
 		</DndProvider>

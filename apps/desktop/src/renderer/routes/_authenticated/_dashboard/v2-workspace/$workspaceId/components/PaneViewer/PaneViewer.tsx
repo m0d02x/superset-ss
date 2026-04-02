@@ -1,6 +1,8 @@
 import {
 	createPaneRoot,
+	type PaneLayoutNode,
 	type PaneRegistry,
+	type PaneRootState,
 	PaneWorkspace,
 } from "@superset/pane-layout";
 import {
@@ -39,6 +41,20 @@ import {
 	type PaneViewerData,
 	type TerminalPaneData,
 } from "./pane-viewer.model";
+
+function layoutNodeHasTerminalPane(
+	node: PaneLayoutNode<PaneViewerData>,
+): boolean {
+	if (node.type === "group") {
+		return node.panes.some((pane) => pane.kind === "terminal");
+	}
+
+	return node.children.some((child) => layoutNodeHasTerminalPane(child));
+}
+
+function rootHasTerminalPane(root: PaneRootState<PaneViewerData>): boolean {
+	return layoutNodeHasTerminalPane(root.root);
+}
 
 interface PaneViewerProps {
 	projectId: string;
@@ -181,6 +197,21 @@ export function PaneViewer({
 	}, [commandPalette]);
 	const setPaneData = store.getState().setPaneData;
 
+	const switchToTerminalRoot = useCallback(
+		(index: number) => {
+			const terminalRoots = store
+				.getState()
+				.state.roots.filter((root) => rootHasTerminalPane(root));
+			const targetRoot = terminalRoots[index];
+			if (!targetRoot) {
+				return;
+			}
+
+			store.getState().setActiveRoot(targetRoot.id);
+		},
+		[store],
+	);
+
 	const paneRegistry = useMemo<PaneRegistry<PaneViewerData>>(
 		() => ({
 			file: {
@@ -254,6 +285,33 @@ export function PaneViewer({
 	useAppHotkey("NEW_CHAT", addChatRoot, undefined, [addChatRoot]);
 	useAppHotkey("NEW_BROWSER", addBrowserRoot, undefined, [addBrowserRoot]);
 	useAppHotkey("QUICK_OPEN", handleQuickOpen, undefined, [handleQuickOpen]);
+	useAppHotkey("JUMP_TO_TAB_1", () => switchToTerminalRoot(0), undefined, [
+		switchToTerminalRoot,
+	]);
+	useAppHotkey("JUMP_TO_TAB_2", () => switchToTerminalRoot(1), undefined, [
+		switchToTerminalRoot,
+	]);
+	useAppHotkey("JUMP_TO_TAB_3", () => switchToTerminalRoot(2), undefined, [
+		switchToTerminalRoot,
+	]);
+	useAppHotkey("JUMP_TO_TAB_4", () => switchToTerminalRoot(3), undefined, [
+		switchToTerminalRoot,
+	]);
+	useAppHotkey("JUMP_TO_TAB_5", () => switchToTerminalRoot(4), undefined, [
+		switchToTerminalRoot,
+	]);
+	useAppHotkey("JUMP_TO_TAB_6", () => switchToTerminalRoot(5), undefined, [
+		switchToTerminalRoot,
+	]);
+	useAppHotkey("JUMP_TO_TAB_7", () => switchToTerminalRoot(6), undefined, [
+		switchToTerminalRoot,
+	]);
+	useAppHotkey("JUMP_TO_TAB_8", () => switchToTerminalRoot(7), undefined, [
+		switchToTerminalRoot,
+	]);
+	useAppHotkey("JUMP_TO_TAB_9", () => switchToTerminalRoot(8), undefined, [
+		switchToTerminalRoot,
+	]);
 
 	return (
 		<>

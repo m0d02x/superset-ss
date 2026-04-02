@@ -3,6 +3,7 @@ import { useLocation, useRouter } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { LuArrowLeft, LuArrowRight } from "react-icons/lu";
 import { HotkeyTooltipContent } from "renderer/components/HotkeyTooltipContent";
+import { env } from "renderer/env.renderer";
 import { useAppHotkey } from "renderer/stores/hotkeys";
 import { HistoryDropdown } from "./components/HistoryDropdown";
 
@@ -68,7 +69,7 @@ export function NavigationControls() {
 				</TooltipContent>
 			</Tooltip>
 
-			<HistoryDropdown />
+			{env.SKIP_ENV_VALIDATION ? null : <HistoryDropdown />}
 		</div>
 	);
 }

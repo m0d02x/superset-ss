@@ -27,6 +27,7 @@ function ServerWorkspacePage() {
 	const worktreePath = decodeURIComponent(workspaceId);
 	const { data: server } = electronTrpc.servers.get.useQuery({ id: serverId });
 	const execMutation = electronTrpc.servers.exec.useMutation();
+	const execServerCommand = execMutation.mutateAsync;
 	const tabCounterRef = useRef(1);
 
 	const [tabs, setTabs] = useState<Tab[]>([
@@ -50,54 +51,50 @@ function ServerWorkspacePage() {
 		restoredRef.current = true;
 
 		const prefix = `ss-${workspaceId}-term-`;
-		execMutation
-			.mutateAsync({
-				id: serverId,
-				command:
-					"tmux list-sessions -F '#{session_name}:#{pane_title}' 2>/dev/null || true",
-			})
-			.then((result) => {
-				if (result.code !== 0 || !result.stdout.trim()) return;
+		execServerCommand({
+			id: serverId,
+			command:
+				"tmux list-sessions -F '#{session_name}:#{pane_title}' 2>/dev/null || true",
+		}).then((result) => {
+			if (result.code !== 0 || !result.stdout.trim()) return;
 
-				const sessions = result.stdout
-					.split("\n")
-					.map((s) => s.trim())
-					.filter((s) => s.startsWith(prefix));
+			const sessions = result.stdout
+				.split("\n")
+				.map((s) => s.trim())
+				.filter((s) => s.startsWith(prefix));
 
-				if (sessions.length === 0) return;
+			if (sessions.length === 0) return;
 
-				const parsed = sessions.map((s) => {
-					const colonIdx = s.indexOf(":", prefix.length);
-					const sessionName = colonIdx >= 0 ? s.slice(0, colonIdx) : s;
-					const paneTitle = colonIdx >= 0 ? s.slice(colonIdx + 1).trim() : "";
-					const id = sessionName.slice(`ss-${workspaceId}-`.length);
-					return { id, paneTitle };
-				});
-
-				// Find the highest term number to set counter
-				const maxNum = Math.max(
-					...parsed.map(({ id }) => {
-						const n = Number.parseInt(id.replace("term-", ""), 10);
-						return Number.isNaN(n) ? 0 : n;
-					}),
-				);
-				tabCounterRef.current = maxNum;
-
-				const restoredTabs: Tab[] = parsed.map(({ id, paneTitle }) => {
-					const num = id.replace("term-", "");
-					const label = paneTitle || `Terminal ${num}`;
-					return { type: "terminal", id, label };
-				});
-
-				setTabs(restoredTabs);
-				setActiveTabId(restoredTabs[0].id);
+			const parsed = sessions.map((s) => {
+				const colonIdx = s.indexOf(":", prefix.length);
+				const sessionName = colonIdx >= 0 ? s.slice(0, colonIdx) : s;
+				const paneTitle = colonIdx >= 0 ? s.slice(colonIdx + 1).trim() : "";
+				const id = sessionName.slice(`ss-${workspaceId}-`.length);
+				return { id, paneTitle };
 			});
-	}, [serverId, workspaceId]);
+
+			// Find the highest term number to set counter
+			const maxNum = Math.max(
+				...parsed.map(({ id }) => {
+					const n = Number.parseInt(id.replace("term-", ""), 10);
+					return Number.isNaN(n) ? 0 : n;
+				}),
+			);
+			tabCounterRef.current = maxNum;
+
+			const restoredTabs: Tab[] = parsed.map(({ id, paneTitle }) => {
+				const num = id.replace("term-", "");
+				const label = paneTitle || `Terminal ${num}`;
+				return { type: "terminal", id, label };
+			});
+
+			setTabs(restoredTabs);
+			setActiveTabId(restoredTabs[0].id);
+		});
+	}, [execServerCommand, serverId, workspaceId]);
 
 	const updateTabLabel = useCallback((tabId: string, label: string) => {
-		setTabs((prev) =>
-			prev.map((t) => (t.id === tabId ? { ...t, label } : t)),
-		);
+		setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, label } : t)));
 	}, []);
 
 	const addTerminal = useCallback(() => {
@@ -228,15 +225,23 @@ function ServerWorkspacePage() {
 				<div className="flex shrink-0 items-center border-b border-border bg-muted/30 h-10">
 					<div className="flex-1 flex items-center overflow-x-auto hide-scrollbar">
 						{tabs.map((tab) => (
-							<button
+							<div
 								key={tab.id}
-								type="button"
+								role="tab"
+								aria-selected={activeTabId === tab.id}
+								tabIndex={0}
 								className={`group flex items-center gap-1.5 px-3 py-1.5 text-xs border-r border-border shrink-0 transition-colors ${
 									activeTabId === tab.id
 										? "bg-background text-foreground"
 										: "text-muted-foreground hover:text-foreground hover:bg-background/50"
 								}`}
 								onClick={() => activateTab(tab.id)}
+								onKeyDown={(event) => {
+									if (event.key === "Enter" || event.key === " ") {
+										event.preventDefault();
+										activateTab(tab.id);
+									}
+								}}
 							>
 								<span className="truncate max-w-32">{tab.label}</span>
 								<button
@@ -250,7 +255,7 @@ function ServerWorkspacePage() {
 								>
 									<X className="size-3" />
 								</button>
-							</button>
+							</div>
 						))}
 					</div>
 
@@ -300,9 +305,7 @@ function ServerWorkspacePage() {
 									workspaceId={workspaceId}
 									terminalId={tab.id}
 									cwd={worktreePath}
-									onTitleChange={(title) =>
-										updateTabLabel(tab.id, title)
-									}
+									onTitleChange={(title) => updateTabLabel(tab.id, title)}
 								/>
 							</div>
 						))}

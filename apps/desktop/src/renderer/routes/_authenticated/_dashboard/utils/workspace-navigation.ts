@@ -2,6 +2,10 @@ import type {
 	NavigateOptions,
 	UseNavigateResult,
 } from "@tanstack/react-router";
+import {
+	getLocalSpaceIdFromWorkspaceId,
+	isSyntheticLocalWorkspaceId,
+} from "renderer/lib/local-space-workspace";
 
 export interface WorkspaceSearchParams {
 	tabId?: string;
@@ -25,6 +29,20 @@ export function navigateToWorkspace(
 ): Promise<void> {
 	const { search, ...rest } = options ?? {};
 	localStorage.setItem("lastViewedWorkspaceId", workspaceId);
+	if (isSyntheticLocalWorkspaceId(workspaceId)) {
+		const spaceId = getLocalSpaceIdFromWorkspaceId(workspaceId);
+		if (!spaceId) {
+			throw new Error(`Invalid synthetic local workspace id: ${workspaceId}`);
+		}
+
+		return navigate({
+			to: "/local-space/$spaceId",
+			params: { spaceId },
+			search: search ?? {},
+			...rest,
+		});
+	}
+
 	return navigate({
 		to: "/workspace/$workspaceId",
 		params: { workspaceId },

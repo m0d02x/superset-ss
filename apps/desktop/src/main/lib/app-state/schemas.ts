@@ -15,10 +15,26 @@ export interface ThemeState {
 	systemDarkThemeId?: string;
 }
 
+export interface LocalSpace {
+	id: string;
+	label: string;
+	directory?: string;
+	color?: string;
+	sortOrder: number;
+	createdAt: number;
+	updatedAt: number;
+	lastOpenedAt: number;
+}
+
+export interface LocalSpacesState {
+	spaces: LocalSpace[];
+}
+
 export interface AppState {
 	tabsState: BaseTabsState;
 	themeState: ThemeState;
 	hotkeysState: HotkeysState;
+	localSpaces: LocalSpacesState;
 }
 
 export const defaultAppState: AppState = {
@@ -36,4 +52,7 @@ export const defaultAppState: AppState = {
 		systemDarkThemeId: "dark",
 	},
 	hotkeysState: createDefaultHotkeysState(),
+	localSpaces: {
+		spaces: [],
+	},
 };

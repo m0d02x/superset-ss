@@ -1,5 +1,6 @@
 import { useMatchRoute, useParams } from "@tanstack/react-router";
 import { HiOutlineWifi } from "react-icons/hi2";
+import { env } from "renderer/env.renderer";
 import { useOnlineStatus } from "renderer/hooks/useOnlineStatus";
 import { electronTrpc } from "renderer/lib/electron-trpc";
 import { getWorkspaceDisplayName } from "renderer/lib/getWorkspaceDisplayName";
@@ -45,7 +46,9 @@ export function TopBar() {
 			</div>
 
 			{isV2WorkspaceRoute ? (
-				<V2WorkspaceSearchBarTrigger workspaceId={v2WorkspaceId} />
+				env.SKIP_ENV_VALIDATION ? null : (
+					<V2WorkspaceSearchBarTrigger workspaceId={v2WorkspaceId} />
+				)
 			) : (
 				workspaceId && (
 					<div className="absolute inset-0 flex items-center justify-center pointer-events-none">
@@ -74,7 +77,9 @@ export function TopBar() {
 					</div>
 				)}
 				{isV2WorkspaceRoute ? (
-					<V2WorkspaceOpenInButton workspaceId={v2WorkspaceId} />
+					env.SKIP_ENV_VALIDATION ? null : (
+						<V2WorkspaceOpenInButton workspaceId={v2WorkspaceId} />
+					)
 				) : workspace?.worktreePath ? (
 					<OpenInMenuButton
 						worktreePath={workspace.worktreePath}
@@ -82,7 +87,7 @@ export function TopBar() {
 						projectId={workspace.project?.id}
 					/>
 				) : null}
-				<OrganizationDropdown />
+				{env.SKIP_ENV_VALIDATION ? null : <OrganizationDropdown />}
 				{!isMac && <WindowControls />}
 			</div>
 		</div>

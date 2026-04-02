@@ -1,5 +1,6 @@
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
+import { useWorkspaceJumpHotkeysEnabled } from "renderer/hooks/useWorkspaceJumpHotkeysEnabled";
 import { navigateToV2Workspace } from "renderer/routes/_authenticated/_dashboard/utils/workspace-navigation";
 import { useAppHotkey } from "renderer/stores/hotkeys";
 import type { DashboardSidebarProject } from "../../types";
@@ -11,6 +12,7 @@ export function useDashboardSidebarShortcuts(
 	groups: DashboardSidebarProject[],
 ) {
 	const navigate = useNavigate();
+	const workspaceHotkeysEnabled = useWorkspaceJumpHotkeysEnabled();
 	const flattenedWorkspaces = useMemo(
 		() =>
 			groups
@@ -38,33 +40,60 @@ export function useDashboardSidebarShortcuts(
 		[flattenedWorkspaces, navigate],
 	);
 
-	useAppHotkey("JUMP_TO_WORKSPACE_1", () => switchToWorkspace(0), undefined, [
-		switchToWorkspace,
-	]);
-	useAppHotkey("JUMP_TO_WORKSPACE_2", () => switchToWorkspace(1), undefined, [
-		switchToWorkspace,
-	]);
-	useAppHotkey("JUMP_TO_WORKSPACE_3", () => switchToWorkspace(2), undefined, [
-		switchToWorkspace,
-	]);
-	useAppHotkey("JUMP_TO_WORKSPACE_4", () => switchToWorkspace(3), undefined, [
-		switchToWorkspace,
-	]);
-	useAppHotkey("JUMP_TO_WORKSPACE_5", () => switchToWorkspace(4), undefined, [
-		switchToWorkspace,
-	]);
-	useAppHotkey("JUMP_TO_WORKSPACE_6", () => switchToWorkspace(5), undefined, [
-		switchToWorkspace,
-	]);
-	useAppHotkey("JUMP_TO_WORKSPACE_7", () => switchToWorkspace(6), undefined, [
-		switchToWorkspace,
-	]);
-	useAppHotkey("JUMP_TO_WORKSPACE_8", () => switchToWorkspace(7), undefined, [
-		switchToWorkspace,
-	]);
-	useAppHotkey("JUMP_TO_WORKSPACE_9", () => switchToWorkspace(8), undefined, [
-		switchToWorkspace,
-	]);
+	useAppHotkey(
+		"JUMP_TO_WORKSPACE_1",
+		() => switchToWorkspace(0),
+		{ enabled: workspaceHotkeysEnabled },
+		[switchToWorkspace, workspaceHotkeysEnabled],
+	);
+	useAppHotkey(
+		"JUMP_TO_WORKSPACE_2",
+		() => switchToWorkspace(1),
+		{ enabled: workspaceHotkeysEnabled },
+		[switchToWorkspace, workspaceHotkeysEnabled],
+	);
+	useAppHotkey(
+		"JUMP_TO_WORKSPACE_3",
+		() => switchToWorkspace(2),
+		{ enabled: workspaceHotkeysEnabled },
+		[switchToWorkspace, workspaceHotkeysEnabled],
+	);
+	useAppHotkey(
+		"JUMP_TO_WORKSPACE_4",
+		() => switchToWorkspace(3),
+		{ enabled: workspaceHotkeysEnabled },
+		[switchToWorkspace, workspaceHotkeysEnabled],
+	);
+	useAppHotkey(
+		"JUMP_TO_WORKSPACE_5",
+		() => switchToWorkspace(4),
+		{ enabled: workspaceHotkeysEnabled },
+		[switchToWorkspace, workspaceHotkeysEnabled],
+	);
+	useAppHotkey(
+		"JUMP_TO_WORKSPACE_6",
+		() => switchToWorkspace(5),
+		{ enabled: workspaceHotkeysEnabled },
+		[switchToWorkspace, workspaceHotkeysEnabled],
+	);
+	useAppHotkey(
+		"JUMP_TO_WORKSPACE_7",
+		() => switchToWorkspace(6),
+		{ enabled: workspaceHotkeysEnabled },
+		[switchToWorkspace, workspaceHotkeysEnabled],
+	);
+	useAppHotkey(
+		"JUMP_TO_WORKSPACE_8",
+		() => switchToWorkspace(7),
+		{ enabled: workspaceHotkeysEnabled },
+		[switchToWorkspace, workspaceHotkeysEnabled],
+	);
+	useAppHotkey(
+		"JUMP_TO_WORKSPACE_9",
+		() => switchToWorkspace(8),
+		{ enabled: workspaceHotkeysEnabled },
+		[switchToWorkspace, workspaceHotkeysEnabled],
+	);
 
 	return workspaceShortcutLabels;
 }

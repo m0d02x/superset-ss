@@ -1,10 +1,13 @@
 import type { ExternalApp } from "@superset/local-db";
+import { Spinner } from "@superset/ui/spinner";
 import { createFileRoute, notFound, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo } from "react";
+import { env } from "renderer/env.renderer";
 import { useCopyToClipboard } from "renderer/hooks/useCopyToClipboard";
 import { useFileOpenMode } from "renderer/hooks/useFileOpenMode";
 import { electronTrpc } from "renderer/lib/electron-trpc";
 import { getWorkspaceDisplayName } from "renderer/lib/getWorkspaceDisplayName";
+import { isSyntheticLocalWorkspaceId } from "renderer/lib/local-space-workspace";
 import { electronTrpcClient as trpcClient } from "renderer/lib/trpc-client";
 import { usePresets } from "renderer/react-query/presets";
 import type { WorkspaceSearchParams } from "renderer/routes/_authenticated/_dashboard/utils/workspace-navigation";
@@ -88,6 +91,29 @@ export const Route = createFileRoute(
 
 function WorkspacePage() {
 	const { workspaceId } = Route.useParams();
+	const routeNavigate = Route.useNavigate();
+
+	useEffect(() => {
+		if (!env.SKIP_ENV_VALIDATION || isSyntheticLocalWorkspaceId(workspaceId)) {
+			return;
+		}
+
+		routeNavigate({ to: "/local", replace: true });
+	}, [routeNavigate, workspaceId]);
+
+	if (env.SKIP_ENV_VALIDATION && !isSyntheticLocalWorkspaceId(workspaceId)) {
+		return (
+			<div className="flex h-full w-full items-center justify-center">
+				<Spinner className="size-5" />
+			</div>
+		);
+	}
+
+	return <LiveWorkspacePage />;
+}
+
+function LiveWorkspacePage() {
+	const { workspaceId } = Route.useParams();
 	const { data: workspace } = electronTrpc.workspaces.get.useQuery({
 		id: workspaceId,
 	});
@@ -130,10 +156,12 @@ function WorkspacePage() {
 	// Check if workspace is initializing or failed
 	const isInitializing = useIsWorkspaceInitializing(workspaceId);
 	const hasFailed = useHasWorkspaceFailed(workspaceId);
+	const isLocalSpace = workspace?.isLocalSpace === true;
 
 	// Check for incomplete init after app restart
 	const gitStatus = workspace?.worktree?.gitStatus;
 	const hasIncompleteInit =
+		!isLocalSpace &&
 		workspace?.type === "worktree" &&
 		(gitStatus === null || gitStatus === undefined);
 
@@ -141,7 +169,8 @@ function WorkspacePage() {
 	// - Actively initializing workspaces (shows progress)
 	// - Failed workspaces (shows error with retry)
 	// - Interrupted workspaces that aren't currently initializing (shows resume option)
-	const showInitView = isInitializing || hasFailed || hasIncompleteInit;
+	const showInitView =
+		!isLocalSpace && (isInitializing || hasFailed || hasIncompleteInit);
 
 	const allTabs = useTabsStore((s) => s.tabs);
 	const activeTabIdForWorkspace = useTabsStore(
@@ -172,6 +201,25 @@ function WorkspacePage() {
 		() => allTabs.filter((tab) => tab.workspaceId === workspaceId),
 		[workspaceId, allTabs],
 	);
+	const addWorkspaceTab = useTabsStore((s) => s.addTab);
+
+	useEffect(() => {
+		if (!isSyntheticLocalWorkspaceId(workspaceId) || tabs.length > 0) {
+			return;
+		}
+
+		const frameId = requestAnimationFrame(() => {
+			const state = useTabsStore.getState();
+			const hasExistingTab = state.tabs.some(
+				(tab) => tab.workspaceId === workspaceId,
+			);
+			if (!hasExistingTab) {
+				addWorkspaceTab(workspaceId);
+			}
+		});
+
+		return () => cancelAnimationFrame(frameId);
+	}, [addWorkspaceTab, tabs.length, workspaceId]);
 
 	const activeTabId = useMemo(() => {
 		return resolveActiveTabIdForWorkspace({

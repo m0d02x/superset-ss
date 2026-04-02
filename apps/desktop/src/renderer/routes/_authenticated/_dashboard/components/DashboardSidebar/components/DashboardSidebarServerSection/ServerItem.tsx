@@ -60,34 +60,23 @@ export function ServerGroupRow({
 	isConnecting,
 }: ServerGroupRowProps) {
 	const row = (
-		// biome-ignore lint/a11y/noStaticElementInteractions: The header acts as a single toggle target while preserving nested inline controls.
-		<div
-			role="button"
-			tabIndex={0}
-			onClick={() => {
-				onToggleCollapse();
-				if (server.status === "disconnected" && !isConnecting) {
-					onConnect();
-				}
-			}}
-			onKeyDown={(event) => {
-				if (event.key === "Enter" || event.key === " ") {
-					event.preventDefault();
+		<div className="group flex min-h-10 w-full items-center pl-3 pr-2 py-2 text-sm font-medium hover:bg-muted/50 transition-colors">
+			<button
+				type="button"
+				onClick={() => {
 					onToggleCollapse();
 					if (server.status === "disconnected" && !isConnecting) {
 						onConnect();
 					}
-				}
-			}}
-			className="group flex min-h-10 w-full items-center pl-3 pr-2 py-2 text-sm font-medium hover:bg-muted/50 transition-colors"
-		>
-			<div className="flex min-w-0 flex-1 items-center gap-2 py-0.5">
+				}}
+				className="flex min-w-0 flex-1 items-center gap-2 py-0.5 text-left"
+			>
 				<StatusDot status={server.status} />
 				<span className="truncate">{server.label}</span>
 				<span className="text-xs font-normal tabular-nums text-muted-foreground">
 					({spaceCount})
 				</span>
-			</div>
+			</button>
 
 			<Tooltip delayDuration={500}>
 				<TooltipTrigger asChild>
@@ -153,6 +142,82 @@ export function ServerGroupRow({
 				</ContextMenuItem>
 			</ContextMenuContent>
 		</ContextMenu>
+	);
+}
+
+interface LocalServerRowProps {
+	isCollapsed: boolean;
+	spaceCount: number;
+	isActive: boolean;
+	onToggleCollapse: () => void;
+	onAddSpace: () => void;
+}
+
+export function LocalServerRow({
+	isCollapsed,
+	spaceCount,
+	isActive,
+	onToggleCollapse,
+	onAddSpace,
+}: LocalServerRowProps) {
+	return (
+		<div className="border-b border-border last:border-b-0">
+			<div
+				className={cn(
+					"group flex min-h-10 w-full items-center pl-3 pr-2 py-2 text-sm font-medium transition-colors",
+					isActive
+						? "bg-background text-foreground"
+						: "hover:bg-muted/50 text-foreground",
+				)}
+			>
+				<button
+					type="button"
+					onClick={onToggleCollapse}
+					className="flex min-w-0 flex-1 items-center gap-2 py-0.5 text-left"
+				>
+					<SquareTerminal className="size-3.5 shrink-0 text-muted-foreground" />
+					<span className="truncate">Local</span>
+					<span className="text-xs font-normal tabular-nums text-muted-foreground">
+						({spaceCount})
+					</span>
+				</button>
+
+				<Tooltip delayDuration={500}>
+					<TooltipTrigger asChild>
+						<button
+							type="button"
+							onClick={(event) => {
+								event.stopPropagation();
+								onAddSpace();
+							}}
+							className="p-1 rounded hover:bg-muted transition-colors shrink-0 ml-1"
+						>
+							<HiMiniPlus className="size-4 text-muted-foreground" />
+						</button>
+					</TooltipTrigger>
+					<TooltipContent side="bottom" sideOffset={4}>
+						New local space
+					</TooltipContent>
+				</Tooltip>
+
+				<button
+					type="button"
+					onClick={(event) => {
+						event.stopPropagation();
+						onToggleCollapse();
+					}}
+					aria-expanded={!isCollapsed}
+					className="p-1 rounded hover:bg-muted transition-colors shrink-0 ml-1"
+				>
+					<HiChevronRight
+						className={cn(
+							"size-3.5 text-muted-foreground transition-transform duration-150",
+							!isCollapsed && "rotate-90",
+						)}
+					/>
+				</button>
+			</div>
+		</div>
 	);
 }
 
@@ -303,9 +368,9 @@ export function ServerSpaceItem({
 					)}
 
 					<SquareTerminal
-							className="mt-2.5 size-4 mr-2 shrink-0 text-muted-foreground"
-							style={color ? { color } : undefined}
-						/>
+						className="mt-2.5 size-4 mr-2 shrink-0 text-muted-foreground"
+						style={color ? { color } : undefined}
+					/>
 
 					<div className="flex min-w-0 flex-1 items-start gap-1.5 py-2">
 						{isEditingDirectory ? (
@@ -455,7 +520,8 @@ export function ServerSpaceItem({
 									onClick={() => onColorChange(c.value)}
 									className={cn(
 										"size-5 rounded-full transition-transform hover:scale-110",
-										color === c.value && "ring-2 ring-foreground ring-offset-1 ring-offset-background",
+										color === c.value &&
+											"ring-2 ring-foreground ring-offset-1 ring-offset-background",
 									)}
 									style={{ backgroundColor: c.value }}
 									title={c.name}

@@ -6,10 +6,16 @@ import {
 } from "@superset/local-db";
 import { TRPCError } from "@trpc/server";
 import { eq, isNotNull, isNull } from "drizzle-orm";
+import { appState } from "main/lib/app-state";
 import { localDb } from "main/lib/local-db";
 import { z } from "zod";
 import { publicProcedure, router } from "../../..";
 import { getWorkspace } from "../utils/db-helpers";
+import {
+	createSyntheticLocalWorkspace,
+	getLocalSpaceByWorkspaceId,
+	getLocalSpaceWorkspaceId,
+} from "../utils/local-space-workspace";
 import { getProjectChildItems } from "../utils/project-children-order";
 import { loadSetupConfig } from "../utils/setup";
 import { computeVisualOrder } from "../utils/visual-order";
@@ -32,8 +38,17 @@ function getWorkspacesInVisualOrder(): string[] {
 		.all();
 
 	const allSections = localDb.select().from(workspaceSections).all();
+	const orderedWorkspaceIds = computeVisualOrder(
+		activeProjects,
+		allWorkspaces,
+		allSections,
+	);
+	const localSpaceWorkspaceIds = appState.data.localSpaces.spaces
+		.slice()
+		.sort((a, b) => a.sortOrder - b.sortOrder)
+		.map((space) => getLocalSpaceWorkspaceId(space.id));
 
-	return computeVisualOrder(activeProjects, allWorkspaces, allSections);
+	return [...orderedWorkspaceIds, ...localSpaceWorkspaceIds];
 }
 
 export const createQueryProcedures = () => {
@@ -41,6 +56,11 @@ export const createQueryProcedures = () => {
 		get: publicProcedure
 			.input(z.object({ id: z.string() }))
 			.query(async ({ input }) => {
+				const localSpace = getLocalSpaceByWorkspaceId(input.id);
+				if (localSpace) {
+					return createSyntheticLocalWorkspace(localSpace, input.id);
+				}
+
 				const workspace = getWorkspace(input.id);
 				if (!workspace) {
 					throw new TRPCError({
@@ -66,6 +86,8 @@ export const createQueryProcedures = () => {
 					...workspace,
 					type: workspace.type as "worktree" | "branch",
 					worktreePath: getWorkspacePath(workspace) ?? "",
+					isLocalSpace: false,
+					localSpace: null,
 					project: project
 						? {
 								id: project.id,
@@ -306,6 +328,11 @@ export const createQueryProcedures = () => {
 		getResolvedRunCommands: publicProcedure
 			.input(z.object({ workspaceId: z.string() }))
 			.query(({ input }) => {
+				const localSpace = getLocalSpaceByWorkspaceId(input.workspaceId);
+				if (localSpace) {
+					return { commands: [] };
+				}
+
 				const workspace = localDb
 					.select()
 					.from(workspaces)

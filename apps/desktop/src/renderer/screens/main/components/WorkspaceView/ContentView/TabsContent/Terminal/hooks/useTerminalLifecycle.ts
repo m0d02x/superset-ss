@@ -849,6 +849,7 @@ export function useTerminalLifecycle({
 				hasWorkspaceRun,
 				isStartingWorkspaceRun: isNewWorkspaceRun,
 				hasActiveAttachRequest: activeAttachRequestId !== null,
+				workspaceId,
 			});
 
 			if (!keepAttachAlive) {

@@ -20,6 +20,19 @@ import { routeTree } from "./routeTree.gen";
 import "./globals.css";
 import "./styles/bundled-fonts.css";
 
+if (import.meta.env.DEV) {
+	const existingScript = document.querySelector<HTMLScriptElement>(
+		'script[data-react-grab="true"]',
+	);
+	if (!existingScript) {
+		const script = document.createElement("script");
+		script.src = "https://unpkg.com/react-grab/dist/index.global.js";
+		script.crossOrigin = "anonymous";
+		script.dataset.reactGrab = "true";
+		document.head.appendChild(script);
+	}
+}
+
 const rootElement = document.querySelector("app");
 initBootErrorHandling(rootElement);
 

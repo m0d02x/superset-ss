@@ -1,17 +1,21 @@
+import { isSyntheticLocalWorkspaceId } from "renderer/lib/local-space-workspace";
+
 export function shouldKeepAttachAliveOnUnmount({
 	paneDestroyed,
 	hasWorkspaceRun,
 	isStartingWorkspaceRun,
 	hasActiveAttachRequest,
+	workspaceId,
 }: {
 	paneDestroyed: boolean;
 	hasWorkspaceRun: boolean;
 	isStartingWorkspaceRun: boolean;
 	hasActiveAttachRequest: boolean;
+	workspaceId: string;
 }): boolean {
 	return (
 		!paneDestroyed &&
-		hasWorkspaceRun &&
-		(isStartingWorkspaceRun || hasActiveAttachRequest)
+		(isSyntheticLocalWorkspaceId(workspaceId) ||
+			(hasWorkspaceRun && (isStartingWorkspaceRun || hasActiveAttachRequest)))
 	);
 }

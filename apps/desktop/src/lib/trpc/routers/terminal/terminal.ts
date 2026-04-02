@@ -15,6 +15,10 @@ import { getTerminalHostClient } from "main/lib/terminal-host/client";
 import { getWorkspaceRuntimeRegistry } from "main/lib/workspace-runtime";
 import { z } from "zod";
 import { publicProcedure, router } from "../..";
+import {
+	getLocalSpaceByWorkspaceId,
+	getResolvedLocalSpaceDirectory,
+} from "../workspaces/utils/local-space-workspace";
 import { assertWorkspaceUsable } from "../workspaces/utils/usability";
 import { resolveTerminalThemeType } from "./theme-type";
 import { getWorkspaceTerminalContext, resolveCwd } from "./utils";
@@ -428,6 +432,11 @@ export const createTerminalRouter = () => {
 		getWorkspaceCwd: publicProcedure
 			.input(z.string())
 			.query(({ input: workspaceId }) => {
+				const localSpace = getLocalSpaceByWorkspaceId(workspaceId);
+				if (localSpace) {
+					return getResolvedLocalSpaceDirectory(localSpace);
+				}
+
 				const workspace = localDb
 					.select()
 					.from(workspaces)

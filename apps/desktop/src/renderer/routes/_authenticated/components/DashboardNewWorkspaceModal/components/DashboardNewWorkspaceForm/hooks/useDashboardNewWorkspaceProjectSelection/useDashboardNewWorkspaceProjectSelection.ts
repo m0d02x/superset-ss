@@ -22,6 +22,7 @@ export function useDashboardNewWorkspaceProjectSelection({
 		(q) =>
 			q
 				.from({ projects: collections.v2Projects })
+				.orderBy(({ projects }) => projects.updatedAt, "desc")
 				.select(({ projects }) => ({ ...projects })),
 		[collections],
 	);

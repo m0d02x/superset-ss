@@ -1,7 +1,9 @@
 import { Spinner } from "@superset/ui/spinner";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
+import { env } from "renderer/env.renderer";
 import { electronTrpc } from "renderer/lib/electron-trpc";
+import { isSyntheticLocalWorkspaceId } from "renderer/lib/local-space-workspace";
 
 export const Route = createFileRoute("/_authenticated/_dashboard/workspace/")({
 	component: WorkspaceIndexPage,
@@ -19,11 +21,22 @@ function WorkspaceIndexPage() {
 	const navigate = useNavigate();
 	const { data: workspaces, isLoading } =
 		electronTrpc.workspaces.getAllGrouped.useQuery();
-
 	const allWorkspaces = workspaces?.flatMap((group) => group.workspaces) ?? [];
 	const hasNoWorkspaces = !isLoading && allWorkspaces.length === 0;
 
 	useEffect(() => {
+		if (!env.SKIP_ENV_VALIDATION) {
+			return;
+		}
+
+		navigate({ to: "/local", replace: true });
+	}, [navigate]);
+
+	useEffect(() => {
+		if (env.SKIP_ENV_VALIDATION) {
+			return;
+		}
+
 		if (isLoading || !workspaces) return;
 
 		if (allWorkspaces.length === 0) {
@@ -33,8 +46,21 @@ function WorkspaceIndexPage() {
 
 		// Try to restore last viewed workspace
 		const lastViewedId = localStorage.getItem("lastViewedWorkspaceId");
+		if (lastViewedId && isSyntheticLocalWorkspaceId(lastViewedId)) {
+			navigate({
+				to: "/workspace/$workspaceId",
+				params: { workspaceId: lastViewedId },
+				replace: true,
+			});
+			return;
+		}
+
+		const preferredWorkspace =
+			allWorkspaces.find(
+				(workspace) => !isSyntheticLocalWorkspaceId(workspace.id),
+			) ?? allWorkspaces[0];
 		const targetWorkspace =
-			allWorkspaces.find((w) => w.id === lastViewedId) ?? allWorkspaces[0];
+			allWorkspaces.find((w) => w.id === lastViewedId) ?? preferredWorkspace;
 
 		if (targetWorkspace) {
 			// Check if this workspace belongs to a remote project
@@ -61,6 +87,10 @@ function WorkspaceIndexPage() {
 			}
 		}
 	}, [workspaces, isLoading, navigate, allWorkspaces]);
+
+	if (env.SKIP_ENV_VALIDATION) {
+		return <LoadingSpinner />;
+	}
 
 	if (hasNoWorkspaces) {
 		return <LoadingSpinner />;

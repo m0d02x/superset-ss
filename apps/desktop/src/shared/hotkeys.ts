@@ -619,49 +619,85 @@ export const HOTKEYS = {
 		description: "Focus the next pane in the current tab",
 	}),
 	JUMP_TO_TAB_1: defineHotkey({
-		keys: "meta+alt+1",
-		label: "Switch to Tab 1",
+		keys: "meta+1",
+		label: "Switch to Terminal 1",
 		category: "Terminal",
+		defaults: {
+			win32: "ctrl+alt+1",
+			linux: "ctrl+alt+1",
+		},
 	}),
 	JUMP_TO_TAB_2: defineHotkey({
-		keys: "meta+alt+2",
-		label: "Switch to Tab 2",
+		keys: "meta+2",
+		label: "Switch to Terminal 2",
 		category: "Terminal",
+		defaults: {
+			win32: "ctrl+alt+2",
+			linux: "ctrl+alt+2",
+		},
 	}),
 	JUMP_TO_TAB_3: defineHotkey({
-		keys: "meta+alt+3",
-		label: "Switch to Tab 3",
+		keys: "meta+3",
+		label: "Switch to Terminal 3",
 		category: "Terminal",
+		defaults: {
+			win32: "ctrl+alt+3",
+			linux: "ctrl+alt+3",
+		},
 	}),
 	JUMP_TO_TAB_4: defineHotkey({
-		keys: "meta+alt+4",
-		label: "Switch to Tab 4",
+		keys: "meta+4",
+		label: "Switch to Terminal 4",
 		category: "Terminal",
+		defaults: {
+			win32: "ctrl+alt+4",
+			linux: "ctrl+alt+4",
+		},
 	}),
 	JUMP_TO_TAB_5: defineHotkey({
-		keys: "meta+alt+5",
-		label: "Switch to Tab 5",
+		keys: "meta+5",
+		label: "Switch to Terminal 5",
 		category: "Terminal",
+		defaults: {
+			win32: "ctrl+alt+5",
+			linux: "ctrl+alt+5",
+		},
 	}),
 	JUMP_TO_TAB_6: defineHotkey({
-		keys: "meta+alt+6",
-		label: "Switch to Tab 6",
+		keys: "meta+6",
+		label: "Switch to Terminal 6",
 		category: "Terminal",
+		defaults: {
+			win32: "ctrl+alt+6",
+			linux: "ctrl+alt+6",
+		},
 	}),
 	JUMP_TO_TAB_7: defineHotkey({
-		keys: "meta+alt+7",
-		label: "Switch to Tab 7",
+		keys: "meta+7",
+		label: "Switch to Terminal 7",
 		category: "Terminal",
+		defaults: {
+			win32: "ctrl+alt+7",
+			linux: "ctrl+alt+7",
+		},
 	}),
 	JUMP_TO_TAB_8: defineHotkey({
-		keys: "meta+alt+8",
-		label: "Switch to Tab 8",
+		keys: "meta+8",
+		label: "Switch to Terminal 8",
 		category: "Terminal",
+		defaults: {
+			win32: "ctrl+alt+8",
+			linux: "ctrl+alt+8",
+		},
 	}),
 	JUMP_TO_TAB_9: defineHotkey({
-		keys: "meta+alt+9",
-		label: "Switch to Tab 9",
+		keys: "meta+9",
+		label: "Switch to Terminal 9",
 		category: "Terminal",
+		defaults: {
+			win32: "ctrl+alt+9",
+			linux: "ctrl+alt+9",
+		},
 	}),
 	OPEN_PRESET_1: defineHotkey({
 		keys: "ctrl+1",

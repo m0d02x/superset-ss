@@ -23,6 +23,7 @@ const CollectionsContext = createContext<CollectionsContextType | null>(null);
 export function preloadActiveOrganizationCollections(
 	activeOrganizationId: string | null | undefined,
 ): void {
+	if (env.SKIP_ENV_VALIDATION) return;
 	if (!activeOrganizationId) return;
 	void preloadCollections(activeOrganizationId).catch((error) => {
 		console.error(
@@ -42,6 +43,7 @@ export function CollectionsProvider({ children }: { children: ReactNode }) {
 	const switchOrganization = useCallback(
 		async (organizationId: string) => {
 			if (organizationId === activeOrganizationId) return;
+			if (env.SKIP_ENV_VALIDATION) return;
 			setIsSwitching(true);
 			try {
 				await authClient.organization.setActive({ organizationId });

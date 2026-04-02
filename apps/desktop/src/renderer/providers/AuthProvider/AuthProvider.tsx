@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect, useState } from "react";
+import { env } from "renderer/env.renderer";
 import { authClient, setAuthToken, setJwt } from "renderer/lib/auth-client";
 import { SupersetLogo } from "renderer/routes/sign-in/components/SupersetLogo/SupersetLogo";
 import { electronTrpc } from "../../lib/electron-trpc";
@@ -14,6 +15,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 		});
 
 	useEffect(() => {
+		if (env.SKIP_ENV_VALIDATION) {
+			setAuthToken(null);
+			setJwt(null);
+			setIsHydrated(true);
+			return;
+		}
+
 		if (!isSuccess || isHydrated) return;
 
 		let cancelled = false;
@@ -57,6 +65,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 	electronTrpc.auth.onTokenChanged.useSubscription(undefined, {
 		onData: async (data) => {
+			if (env.SKIP_ENV_VALIDATION) {
+				setAuthToken(null);
+				setJwt(null);
+				setIsHydrated(true);
+				return;
+			}
+
 			if (data?.token && data?.expiresAt) {
 				setAuthToken(null);
 				await authClient.signOut({ fetchOptions: { throw: false } });
@@ -83,10 +98,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 				}
 			}
 		},
+		enabled: !env.SKIP_ENV_VALIDATION,
 	});
 
 	useEffect(() => {
-		if (!isHydrated) return;
+		if (!isHydrated || env.SKIP_ENV_VALIDATION) return;
 
 		const refreshJwt = () =>
 			authClient

@@ -6,6 +6,10 @@ import {
 } from "@superset/local-db";
 import { eq } from "drizzle-orm";
 import { localDb } from "main/lib/local-db";
+import {
+	getLocalSpaceByWorkspaceId,
+	getResolvedLocalSpaceDirectory,
+} from "../../workspaces/utils/local-space-workspace";
 
 const WORKSPACE_TERMINAL_CONTEXT_CACHE_TTL_MS = 500;
 const MAX_WORKSPACE_TERMINAL_CONTEXT_CACHE_ENTRIES = 256;
@@ -29,6 +33,16 @@ const workspaceTerminalContextCache = new Map<
 function loadWorkspaceTerminalContext(
 	workspaceId: string,
 ): WorkspaceTerminalContext {
+	const localSpace = getLocalSpaceByWorkspaceId(workspaceId);
+	if (localSpace) {
+		const directory = getResolvedLocalSpaceDirectory(localSpace);
+		return {
+			workspace: undefined,
+			workspacePath: directory,
+			rootPath: directory,
+		};
+	}
+
 	const row = localDb
 		.select({
 			workspace: workspaces,

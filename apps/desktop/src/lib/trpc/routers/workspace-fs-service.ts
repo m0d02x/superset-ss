@@ -8,6 +8,10 @@ import {
 } from "@superset/workspace-fs/host";
 import { shell } from "electron";
 import { getWorkspace } from "./workspaces/utils/db-helpers";
+import {
+	getLocalSpaceByWorkspaceId,
+	getResolvedLocalSpaceDirectory,
+} from "./workspaces/utils/local-space-workspace";
 import { execWithShellEnv } from "./workspaces/utils/shell-env";
 import { getWorkspacePath } from "./workspaces/utils/worktree";
 
@@ -31,6 +35,11 @@ const sharedHostServiceOptions = {
 };
 
 export function resolveWorkspaceRootPath(workspaceId: string): string {
+	const localSpace = getLocalSpaceByWorkspaceId(workspaceId);
+	if (localSpace) {
+		return getResolvedLocalSpaceDirectory(localSpace);
+	}
+
 	const workspace = getWorkspace(workspaceId);
 	if (!workspace) {
 		throw new Error(`Workspace not found: ${workspaceId}`);
