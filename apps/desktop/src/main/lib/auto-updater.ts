@@ -1,8 +1,11 @@
 import { EventEmitter } from "node:events";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { app, dialog } from "electron";
 import { autoUpdater } from "electron-updater";
 import { env } from "main/env.main";
 import { setSkipQuitConfirmation } from "main/index";
+import { SUPERSET_HOME_DIR } from "main/lib/app-environment";
 import { prerelease } from "semver";
 import { AUTO_UPDATE_STATUS, type AutoUpdateStatus } from "shared/auto-update";
 import { PLATFORM } from "shared/constants";
@@ -22,6 +25,7 @@ function isPrereleaseBuild(): boolean {
 
 const IS_PRERELEASE = isPrereleaseBuild();
 const IS_AUTO_UPDATE_PLATFORM = PLATFORM.IS_MAC || PLATFORM.IS_LINUX;
+const INSTALL_METADATA_PATH = join(SUPERSET_HOME_DIR, "install-metadata.json");
 
 // Use explicit feed URLs to ensure we always fetch platform-specific manifests
 // (for example latest-mac.yml and latest-linux.yml) from the correct release.
@@ -30,6 +34,38 @@ const IS_AUTO_UPDATE_PLATFORM = PLATFORM.IS_MAC || PLATFORM.IS_LINUX;
 const UPDATE_FEED_URL = IS_PRERELEASE
 	? "https://github.com/superset-sh/superset/releases/download/desktop-canary"
 	: "https://github.com/superset-sh/superset/releases/latest/download";
+
+function isAutoUpdateEnabled(): boolean {
+	if (
+		!app.isPackaged ||
+		env.NODE_ENV === "development" ||
+		!IS_AUTO_UPDATE_PLATFORM
+	) {
+		return false;
+	}
+
+	if (!existsSync(INSTALL_METADATA_PATH)) {
+		return true;
+	}
+
+	try {
+		const installMetadata = JSON.parse(
+			readFileSync(INSTALL_METADATA_PATH, "utf8"),
+		) as {
+			installMethod?: string;
+		};
+
+		return installMetadata.installMethod !== "manual-build-install";
+	} catch (error) {
+		console.warn(
+			`[auto-updater] Failed to read install metadata at ${INSTALL_METADATA_PATH}:`,
+			error,
+		);
+		return true;
+	}
+}
+
+const IS_AUTO_UPDATE_ENABLED = isAutoUpdateEnabled();
 
 export interface AutoUpdateStatusEvent {
 	status: AutoUpdateStatus;
@@ -86,7 +122,7 @@ export function getUpdateStatus(): AutoUpdateStatusEvent {
 }
 
 export function installUpdate(): void {
-	if (env.NODE_ENV === "development") {
+	if (!IS_AUTO_UPDATE_ENABLED) {
 		console.info("[auto-updater] Install skipped in dev mode");
 		emitStatus(AUTO_UPDATE_STATUS.IDLE);
 		return;
@@ -102,7 +138,7 @@ export function dismissUpdate(): void {
 }
 
 export function checkForUpdates(): void {
-	if (env.NODE_ENV === "development" || !IS_AUTO_UPDATE_PLATFORM) {
+	if (!IS_AUTO_UPDATE_ENABLED) {
 		return;
 	}
 	isDismissed = false;
@@ -119,11 +155,20 @@ export function checkForUpdates(): void {
 }
 
 export function checkForUpdatesInteractive(): void {
-	if (env.NODE_ENV === "development") {
+	if (!app.isPackaged || env.NODE_ENV === "development") {
 		dialog.showMessageBox({
 			type: "info",
 			title: "Updates",
 			message: "Auto-updates are disabled in development mode.",
+		});
+		return;
+	}
+	if (!IS_AUTO_UPDATE_ENABLED) {
+		dialog.showMessageBox({
+			type: "info",
+			title: "Updates Disabled",
+			message:
+				"Auto-updates are disabled for this locally installed build. Use the build:install workflow to upgrade manually.",
 		});
 		return;
 	}
@@ -200,7 +245,10 @@ export function simulateError(): void {
 }
 
 export function setupAutoUpdater(): void {
-	if (env.NODE_ENV === "development" || !IS_AUTO_UPDATE_PLATFORM) {
+	if (!IS_AUTO_UPDATE_ENABLED) {
+		console.info(
+			`[auto-updater] Disabled (packaged=${app.isPackaged}, installMetadata=${INSTALL_METADATA_PATH})`,
+		);
 		return;
 	}
 
