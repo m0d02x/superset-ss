@@ -412,6 +412,7 @@ export const servers = sqliteTable(
 			.$type<ServerAuthMethod>()
 			.default("key"),
 		sshKeyPath: text("ssh_key_path"),
+		homeDirectory: text("home_directory"),
 		hostServicePort: integer("host_service_port").notNull().default(4879),
 		hostServiceSecret: text("host_service_secret"),
 		status: text("status")

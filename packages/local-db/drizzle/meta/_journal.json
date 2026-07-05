@@ -295,6 +295,13 @@
       "when": 1774801196011,
       "tag": "0041_add_server_space_color",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "6",
+      "when": 1783132800000,
+      "tag": "0042_add_server_home_directory",
+      "breakpoints": true
     }
   ]
 }
