@@ -8,6 +8,7 @@ import {
 	buildRemoteSessionKey,
 	useRemoteSessionsStore,
 } from "renderer/stores/remote-sessions";
+import { HYPERSET_TMUX } from "shared/tmux";
 import { RemoteFileViewer } from "./components/RemoteFileViewer";
 import { ServerWorkspaceSidebar } from "./components/ServerWorkspaceSidebar";
 import { SSHTerminal } from "./components/SSHTerminal";
@@ -53,8 +54,7 @@ function ServerWorkspacePage() {
 		const prefix = `ss-${workspaceId}-term-`;
 		execServerCommand({
 			id: serverId,
-			command:
-				"tmux list-sessions -F '#{session_name}:#{pane_title}' 2>/dev/null || true",
+			command: `${HYPERSET_TMUX} list-sessions -F '#{session_name}:#{pane_title}' 2>/dev/null || true`,
 		}).then((result) => {
 			if (result.code !== 0 || !result.stdout.trim()) return;
 

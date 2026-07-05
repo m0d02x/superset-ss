@@ -2,11 +2,19 @@ import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
+import { dirname } from "node:path";
 import type {
 	ServerAuthMethod,
 	ServerStatus,
 } from "@superset/local-db/schema/zod";
-import { Client, type ClientChannel } from "ssh2";
+import {
+	HYPERSET_TMUX,
+	HYPERSET_TMUX_CONF,
+	HYPERSET_TMUX_CONF_CONTENT,
+	HYPERSET_TMUX_SOCKET,
+	isHypersetSession,
+} from "shared/tmux";
+import { Client, type ClientChannel, type SFTPWrapper } from "ssh2";
 
 export interface SSHConnectConfig {
 	serverId: string;
@@ -68,8 +76,11 @@ class SSHConnectionManager extends EventEmitter {
 				clearTimeout(connectTimeout);
 				this.connections.set(config.serverId, { client });
 				this.emitStatus(config.serverId, "connected");
-				// Clean up orphaned ss-* tmux sessions from previous app runs
-				this.cleanupStaleTmuxSocket(config.serverId).catch(() => {});
+				// Write our managed tmux config, then clean up any stale
+				// hyperset tmux socket from previous app runs
+				this.ensureTmuxConfig(config.serverId)
+					.then(() => this.cleanupStaleTmuxSocket(config.serverId))
+					.catch(() => {});
 				resolve();
 			});
 
@@ -157,6 +168,46 @@ class SSHConnectionManager extends EventEmitter {
 		} finally {
 			this.releaseExecSlot(serverId);
 		}
+	}
+
+	async uploadFile(
+		serverId: string,
+		localPath: string,
+		remotePath: string,
+	): Promise<void> {
+		const entry = this.connections.get(serverId);
+		if (!entry) {
+			throw new Error(`Not connected to server ${serverId}`);
+		}
+
+		await this.waitForChannelCapacity(serverId);
+		await this.exec(
+			serverId,
+			`mkdir -p ${JSON.stringify(dirname(remotePath))} 2>/dev/null`,
+		);
+
+		const sftp = await new Promise<SFTPWrapper>((resolve, reject) => {
+			entry.client.sftp((error, nextSftp) => {
+				if (error) {
+					reject(error);
+					return;
+				}
+
+				resolve(nextSftp);
+			});
+		});
+
+		await new Promise<void>((resolve, reject) => {
+			sftp.fastPut(localPath, remotePath, (error) => {
+				sftp.end();
+				if (error) {
+					reject(error);
+					return;
+				}
+
+				resolve();
+			});
+		});
 	}
 
 	private acquireExecSlot(serverId: string): Promise<void> {
@@ -302,12 +353,21 @@ class SSHConnectionManager extends EventEmitter {
 					const cwdArg = opts.cwd
 						? ` -c ${this.shellQuote(opts.cwd.trim())}`
 						: "";
-					// Tmux settings live in ~/.tmux.conf on the remote host.
-					// TERM=xterm-256color is set in ~/.bashrc on the remote host.
-					// printf \033c resets the terminal (clears any visible command echo)
-					// before tmux takes over the screen.
+					// Hyperset sessions (ss-*) run on our private socket with our
+					// managed config; external sessions attach on the user's
+					// default socket with their own ~/.tmux.conf.
+					const tmuxCmd = isHypersetSession(name)
+						? `${HYPERSET_TMUX} -f ${HYPERSET_TMUX_CONF}`
+						: "tmux";
+					// Escape sequence notes (DO NOT "simplify" — see below):
+					// - \033[2J\033[H (clear screen + home cursor) preserves xterm
+					//   scrollback. \033c (full RIS reset) would wipe it on every attach.
+					// - '\; set mouse on' chains a tmux command: single-quoted \; is
+					//   tmux's internal separator (not bash's). Enables wheel scroll via
+					//   tmux copy-mode (pane history survives reconnects) + mouse
+					//   forwarding to TUI apps. Idempotent per attach.
 					stream.write(
-						`printf '\\033c'; TMUX= tmux new-session -As ${name}${cwdArg}\n`,
+						`printf '\\033[2J\\033[H'; TMUX= ${tmuxCmd} new-session -As ${name}${cwdArg} '\\;' set mouse on\n`,
 					);
 				} else if (opts.cwd) {
 					const targetCwd = opts.cwd.trim();
@@ -322,8 +382,9 @@ class SSHConnectionManager extends EventEmitter {
 				return sessionId;
 			} catch (err) {
 				lastError = err instanceof Error ? err : new Error(String(err));
-				const isChannelFailure =
-					lastError.message.includes("Channel open failure");
+				const isChannelFailure = lastError.message.includes(
+					"Channel open failure",
+				);
 
 				if (!isChannelFailure || attempt >= SHELL_OPEN_MAX_RETRIES) {
 					break;
@@ -369,7 +430,11 @@ class SSHConnectionManager extends EventEmitter {
 			// Kill the tmux session via a separate exec so it reliably runs
 			// before we tear down the shell channel.
 			const name = this.sanitizeTmuxName(session.tmuxSession);
-			this.exec(session.serverId, `tmux kill-session -t ${name} 2>/dev/null`)
+			const tmuxCmd = isHypersetSession(name) ? HYPERSET_TMUX : "tmux";
+			this.exec(
+				session.serverId,
+				`${tmuxCmd} kill-session -t ${name} 2>/dev/null`,
+			)
 				.catch(() => {})
 				.finally(() => {
 					session.stream.close();
@@ -391,18 +456,35 @@ class SSHConnectionManager extends EventEmitter {
 		return `'${s.replace(/'/g, "'\\''")}'`;
 	}
 
-	/** Clean up stale tmux socket if the server process died */
+	/**
+	 * Write the Hyperset-managed tmux config to the remote host.
+	 * Loaded via `-f` when the hyperset tmux server starts, so behavior
+	 * doesn't depend on the user's ~/.tmux.conf.
+	 */
+	private async ensureTmuxConfig(serverId: string): Promise<void> {
+		const confDir = HYPERSET_TMUX_CONF.slice(
+			0,
+			HYPERSET_TMUX_CONF.lastIndexOf("/"),
+		);
+		await this.exec(
+			serverId,
+			`mkdir -p ${confDir} && cat > ${HYPERSET_TMUX_CONF} <<'HYPERSET_EOF'\n${HYPERSET_TMUX_CONF_CONTENT}HYPERSET_EOF`,
+		);
+	}
+
+	/** Clean up a stale hyperset tmux socket if the server process died */
 	private async cleanupStaleTmuxSocket(serverId: string): Promise<void> {
 		const result = await this.exec(
 			serverId,
-			"tmux list-sessions -F '#{session_name}' 2>/dev/null",
+			`${HYPERSET_TMUX} list-sessions -F '#{session_name}' 2>/dev/null`,
 		);
 		if (result.code !== 0) {
-			// tmux server may have a stale socket from a crash or kill —
-			// remove it so the next new-session can start fresh.
+			// The hyperset tmux server may have a stale socket from a crash
+			// or kill — remove only our socket so the next new-session can
+			// start fresh. Never touch the user's default tmux socket.
 			await this.exec(
 				serverId,
-				"rm -rf /tmp/tmux-$(id -u)/ 2>/dev/null",
+				`rm -f /tmp/tmux-$(id -u)/${HYPERSET_TMUX_SOCKET} 2>/dev/null`,
 			);
 		}
 		// Don't kill detached ss-* sessions — they're restored as tabs

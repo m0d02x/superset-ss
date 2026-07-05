@@ -21,6 +21,7 @@ import {
 	type ServerTerminal,
 	useServersStore,
 } from "renderer/stores/servers-state";
+import { HYPERSET_SESSION_PREFIX, HYPERSET_TMUX } from "shared/tmux";
 import { GhosttySSHTerminal } from "./components/GhosttySSHTerminal";
 import { SSHTerminal } from "./components/SSHTerminal";
 import { RemoteFileViewer } from "./workspace/$workspaceId/components/RemoteFileViewer";
@@ -117,59 +118,63 @@ function ServerPage() {
 		const prefix = `ss-${spaceId}-term-`;
 		execServerCommand({
 			id: serverId,
-			command:
-				"tmux list-sessions -F '#{session_name}:#{session_activity}:#{pane_title}' 2>/dev/null || true",
-		}).then((result) => {
-			if (result.code !== 0 || !result.stdout.trim()) return;
+			command: `${HYPERSET_TMUX} list-sessions -F '#{session_name}:#{session_activity}:#{pane_title}' 2>/dev/null || true`,
+		})
+			.then((result) => {
+				if (result.code !== 0 || !result.stdout.trim()) return;
 
-			const allLines = result.stdout
-				.split("\n")
-				.map((s) => s.trim())
-				.filter((s) => s.startsWith(prefix));
+				const allLines = result.stdout
+					.split("\n")
+					.map((s) => s.trim())
+					.filter((s) => s.startsWith(prefix));
 
-			if (allLines.length === 0) return;
+				if (allLines.length === 0) return;
 
-			const allSessions = allLines.map((s) => {
-				const firstColon = s.indexOf(":", prefix.length);
-				const secondColon = s.indexOf(":", firstColon + 1);
-				const sessionName = firstColon >= 0 ? s.slice(0, firstColon) : s;
-				const activity =
-					firstColon >= 0 && secondColon >= 0
-						? Number.parseInt(s.slice(firstColon + 1, secondColon), 10)
-						: 0;
-				const paneTitle =
-					secondColon >= 0 ? s.slice(secondColon + 1).trim() : "";
-				const id = sessionName.slice(`ss-${spaceId}-`.length);
-				return { id, sessionName, activity, paneTitle };
-			});
-
-			// Sort by activity (most recent first), keep top 5, kill the rest
-			const MAX_RESTORED_TABS = 5;
-			allSessions.sort((a, b) => b.activity - a.activity);
-			const toRestore = allSessions.slice(0, MAX_RESTORED_TABS);
-			const toKill = allSessions.slice(MAX_RESTORED_TABS);
-
-			if (toKill.length > 0) {
-				const killCmd = toKill
-					.map((s) => `tmux kill-session -t '${s.sessionName}'`)
-					.join(" ; ");
-				execServerCommand({
-					id: serverId,
-					command: `${killCmd} 2>/dev/null || true`,
+				const allSessions = allLines.map((s) => {
+					const firstColon = s.indexOf(":", prefix.length);
+					const secondColon = s.indexOf(":", firstColon + 1);
+					const sessionName = firstColon >= 0 ? s.slice(0, firstColon) : s;
+					const activity =
+						firstColon >= 0 && secondColon >= 0
+							? Number.parseInt(s.slice(firstColon + 1, secondColon), 10)
+							: 0;
+					const paneTitle =
+						secondColon >= 0 ? s.slice(secondColon + 1).trim() : "";
+					const id = sessionName.slice(`ss-${spaceId}-`.length);
+					return { id, sessionName, activity, paneTitle };
 				});
-			}
 
-			const ids = toRestore.map(({ id }) => id);
-			restoreTerminalsForSpace(spaceId, ids);
+				// Sort by activity (most recent first), keep top 5, kill the rest
+				const MAX_RESTORED_TABS = 5;
+				allSessions.sort((a, b) => b.activity - a.activity);
+				const toRestore = allSessions.slice(0, MAX_RESTORED_TABS);
+				const toKill = allSessions.slice(MAX_RESTORED_TABS);
 
-			// Apply tmux pane titles to restored tabs
-			for (const { id, paneTitle } of toRestore) {
-				if (paneTitle) {
-					setTerminalLabel(spaceId, id, paneTitle);
-					explicitTitlesRef.current.add(id);
+				if (toKill.length > 0) {
+					const killCmd = toKill
+						.map((s) => `${HYPERSET_TMUX} kill-session -t '${s.sessionName}'`)
+						.join(" ; ");
+					execServerCommand({
+						id: serverId,
+						command: `${killCmd} 2>/dev/null || true`,
+					});
 				}
-			}
-		});
+
+				const ids = toRestore.map(({ id }) => id);
+				restoreTerminalsForSpace(spaceId, ids);
+
+				// Apply tmux pane titles to restored tabs
+				for (const { id, paneTitle } of toRestore) {
+					if (paneTitle) {
+						setTerminalLabel(spaceId, id, paneTitle);
+						explicitTitlesRef.current.add(id);
+					}
+				}
+			})
+			.catch(() => {
+				// Allow a retry on the next connected render (reconnect race)
+				restoredSpacesRef.current.delete(spaceId);
+			});
 	}, [
 		execServerCommand,
 		restoreTerminalsForSpace,
@@ -268,11 +273,6 @@ function ServerPage() {
 	useEffect(() => {
 		if (!tmuxDropdownOpen || !spaceId || server?.status !== "connected") return;
 
-		// Sessions already shown as tabs in this space
-		const currentSpaceTabs = new Set(
-			(spaceTerminals[spaceId] || []).map((t) => `ss-${spaceId}-${t.id}`),
-		);
-
 		execServerCommand({
 			id: serverId,
 			command:
@@ -296,20 +296,15 @@ function ServerPage() {
 					return { name, title, attached };
 				})
 				.filter((s) => {
-					// Only show non-Hyperset sessions (manually created tmux)
-					return !s.name.startsWith("ss-");
+					// Only show non-Hyperset sessions (manually created tmux).
+					// These live on the user's default tmux socket, so this
+					// query intentionally does NOT use HYPERSET_TMUX.
+					return !s.name.startsWith(HYPERSET_SESSION_PREFIX);
 				});
 
 			setTmuxSessions(sessions);
 		});
-	}, [
-		execServerCommand,
-		server,
-		serverId,
-		spaceId,
-		spaceTerminals,
-		tmuxDropdownOpen,
-	]);
+	}, [execServerCommand, server, serverId, spaceId, tmuxDropdownOpen]);
 
 	const handleAttachTmux = useCallback(
 		(sessionName: string, sessionTitle: string) => {

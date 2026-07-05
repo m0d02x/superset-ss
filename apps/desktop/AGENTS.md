@@ -13,16 +13,16 @@ The desktop app's primary workspace model is **server workspaces** — remote se
 - Tmux session naming: `ss-${spaceId}-${terminalId}` (e.g. `ss-abc123-term-1`)
 - Tab/terminal state lives in `renderer/stores/servers-state.ts` (ephemeral, restored from tmux on reconnect)
 
-### Remote host configuration
-Tmux and shell settings live on the remote server, not sent inline from the app:
-- `~/.tmux.conf` — tmux options (status off, clipboard, passthrough, escape-time, etc.)
-- `~/.bashrc` — `TERM=xterm-256color`
-
-This avoids command flicker when opening new terminal tabs.
+### Tmux socket isolation (`src/shared/tmux.ts`)
+Hyperset-managed sessions (`ss-*`) run on a **private tmux socket** (`tmux -L hyperset`) with a managed config, fully isolated from the user's own tmux server:
+- On connect, `~/.config/hyperset/tmux.conf` is (re)written to the remote host (status off, clipboard, passthrough, escape-time, mouse, etc.)
+- The hyperset tmux server starts with `-f ~/.config/hyperset/tmux.conf`, so behavior never depends on the user's `~/.tmux.conf` or `~/.bashrc`
+- All commands touching `ss-*` sessions (new-session, list-sessions, kill-session, socket cleanup) MUST use `HYPERSET_TMUX` from `shared/tmux`
+- The "Attach" dropdown intentionally queries the **default** socket — it lists the user's own tmux sessions; attaching to one uses plain `tmux`
 
 ### Session persistence
 - Tmux sessions survive app restarts — on reconnect, existing `ss-*` sessions are discovered and restored as tabs
-- Stale tmux sockets (from crashes) are cleaned up automatically on connect
+- A stale hyperset tmux socket (from crashes) is cleaned up automatically on connect (only `/tmp/tmux-$UID/hyperset`, never the user's default socket)
 - Detached sessions are NOT killed — they're reattached when the space is reopened
 - Only explicit tab close (`destroySession`) kills the tmux session
 
