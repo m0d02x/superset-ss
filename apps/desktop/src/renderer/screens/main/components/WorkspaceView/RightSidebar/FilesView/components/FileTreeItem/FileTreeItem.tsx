@@ -7,11 +7,13 @@ import {
 	ContextMenuTrigger,
 } from "@superset/ui/context-menu";
 import { cn } from "@superset/ui/utils";
+import { AnimatePresence, motion } from "framer-motion";
 import {
 	LuChevronDown,
 	LuChevronRight,
 	LuClipboard,
 	LuCopy,
+	LuCornerDownLeft,
 	LuExternalLink,
 	LuFile,
 	LuFolder,
@@ -36,6 +38,10 @@ interface FileTreeItemProps {
 	onNewFolder: (parentPath: string) => void;
 	onRename: (entry: DirectoryEntry) => void;
 	onDelete: (entry: DirectoryEntry) => void;
+	onDragEnterExternalFiles?: (entry: DirectoryEntry) => void;
+	onDragLeaveExternalFiles?: (entry: DirectoryEntry) => void;
+	onDropExternalFiles?: (entry: DirectoryEntry, files: File[]) => void;
+	isExternalDragTarget?: boolean;
 	hideCreateActions?: boolean;
 	hideMutationActions?: boolean;
 }
@@ -53,12 +59,17 @@ export function FileTreeItem({
 	onNewFolder,
 	onRename,
 	onDelete,
+	onDragEnterExternalFiles,
+	onDragLeaveExternalFiles,
+	onDropExternalFiles,
+	isExternalDragTarget = false,
 	hideCreateActions = false,
 	hideMutationActions = false,
 }: FileTreeItemProps) {
 	const isFolder = entry.isDirectory;
 	const isExpanded = item.isExpanded();
 	const level = item.getItemMeta().level;
+	const showParentFolderHint = isExternalDragTarget && !isFolder;
 
 	const parentPath = isFolder
 		? entry.path
@@ -109,6 +120,50 @@ export function FileTreeItem({
 		}
 	};
 
+	const handleDragOver = (e: React.DragEvent) => {
+		if (!onDropExternalFiles || !e.dataTransfer.types.includes("Files")) {
+			return;
+		}
+
+		e.preventDefault();
+		e.stopPropagation();
+		e.dataTransfer.dropEffect = "copy";
+	};
+
+	const handleDragEnter = (e: React.DragEvent) => {
+		if (!onDragEnterExternalFiles || !e.dataTransfer.types.includes("Files")) {
+			return;
+		}
+
+		e.preventDefault();
+		e.stopPropagation();
+		onDragEnterExternalFiles(entry);
+	};
+
+	const handleDragLeave = (e: React.DragEvent) => {
+		if (!onDragLeaveExternalFiles || !e.dataTransfer.types.includes("Files")) {
+			return;
+		}
+
+		e.preventDefault();
+		e.stopPropagation();
+		const nextTarget = e.relatedTarget;
+		if (nextTarget instanceof Node && e.currentTarget.contains(nextTarget)) {
+			return;
+		}
+		onDragLeaveExternalFiles(entry);
+	};
+
+	const handleDrop = (e: React.DragEvent) => {
+		if (!onDropExternalFiles || !e.dataTransfer.types.includes("Files")) {
+			return;
+		}
+
+		e.preventDefault();
+		e.stopPropagation();
+		onDropExternalFiles(entry, Array.from(e.dataTransfer.files));
+	};
+
 	const itemContent = (
 		<div
 			{...item.getProps()}
@@ -125,10 +180,18 @@ export function FileTreeItem({
 				"flex items-center gap-1 px-1 cursor-pointer select-none",
 				"hover:bg-accent/50 transition-colors",
 				item.isSelected() && "bg-accent",
+				isExternalDragTarget &&
+					(isFolder
+						? "bg-primary/10 ring-1 ring-inset ring-primary/40"
+						: "bg-primary/5 text-foreground"),
 			)}
 			onClick={handleClick}
 			onDoubleClick={handleDoubleClick}
 			onKeyDown={handleKeyDown}
+			onDragOver={handleDragOver}
+			onDragEnter={handleDragEnter}
+			onDragLeave={handleDragLeave}
+			onDrop={handleDrop}
 		>
 			<span className="flex items-center justify-center w-4 h-4 shrink-0">
 				{isFolder ? (
@@ -144,10 +207,28 @@ export function FileTreeItem({
 				fileName={entry.name}
 				isDirectory={isFolder}
 				isOpen={isExpanded}
-				className="size-4 shrink-0"
+				className={cn(
+					"size-4 shrink-0",
+					isExternalDragTarget && isFolder && "text-primary",
+				)}
 			/>
 
 			<span className="flex-1 min-w-0 text-xs truncate">{entry.name}</span>
+
+			<AnimatePresence initial={false}>
+				{showParentFolderHint && (
+					<motion.span
+						initial={{ opacity: 0, x: 4, scale: 0.96 }}
+						animate={{ opacity: 1, x: 0, scale: 1 }}
+						exit={{ opacity: 0, x: 4, scale: 0.96 }}
+						transition={{ duration: 0.14, ease: "easeOut" }}
+						className="inline-flex items-center gap-1 shrink-0 rounded-sm bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary"
+					>
+						<LuCornerDownLeft className="size-3" />
+						To folder
+					</motion.span>
+				)}
+			</AnimatePresence>
 		</div>
 	);
 

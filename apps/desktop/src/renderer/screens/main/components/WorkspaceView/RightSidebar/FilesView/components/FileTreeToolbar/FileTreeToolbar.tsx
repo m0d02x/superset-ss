@@ -4,6 +4,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@superset/ui/tooltip";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
 	LuChevronsDownUp,
+	LuEye,
+	LuEyeOff,
 	LuFilePlus,
 	LuFolderPlus,
 	LuRefreshCw,
@@ -16,9 +18,11 @@ interface FileTreeToolbarProps {
 	onSearchChange: (term: string) => void;
 	onNewFile: () => void;
 	onNewFolder: () => void;
+	onToggleHiddenFiles: () => void;
 	onCollapseAll: () => void;
 	onRefresh: () => void;
 	isRefreshing?: boolean;
+	showHiddenFiles?: boolean;
 	hideCreateActions?: boolean;
 	hideSearch?: boolean;
 }
@@ -28,9 +32,11 @@ export function FileTreeToolbar({
 	onSearchChange,
 	onNewFile,
 	onNewFolder,
+	onToggleHiddenFiles,
 	onCollapseAll,
 	onRefresh,
 	isRefreshing = false,
+	showHiddenFiles = false,
 	hideCreateActions = false,
 	hideSearch = false,
 }: FileTreeToolbarProps) {
@@ -80,7 +86,9 @@ export function FileTreeToolbar({
 	}, [onSearchChange]);
 
 	return (
-		<div className={`flex flex-col gap-1 px-2 border-b border-border ${hideSearch ? "h-10 justify-center" : "py-1.5"}`}>
+		<div
+			className={`flex flex-col gap-1 px-2 border-b border-border ${hideSearch ? "h-10 justify-center" : "py-1.5"}`}
+		>
 			{!hideSearch && (
 				<div className="relative">
 					<Input
@@ -136,6 +144,26 @@ export function FileTreeToolbar({
 				)}
 
 				<div className="flex-1" />
+
+				<Tooltip>
+					<TooltipTrigger asChild>
+						<Button
+							variant="ghost"
+							size="icon"
+							className="size-6"
+							onClick={onToggleHiddenFiles}
+						>
+							{showHiddenFiles ? (
+								<LuEyeOff className="size-3.5" />
+							) : (
+								<LuEye className="size-3.5" />
+							)}
+						</Button>
+					</TooltipTrigger>
+					<TooltipContent side="bottom">
+						{showHiddenFiles ? "Hide Hidden Files" : "Show Hidden Files"}
+					</TooltipContent>
+				</Tooltip>
 
 				<Tooltip>
 					<TooltipTrigger asChild>

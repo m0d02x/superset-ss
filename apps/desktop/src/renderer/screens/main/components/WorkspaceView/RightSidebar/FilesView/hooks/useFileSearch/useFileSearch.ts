@@ -5,6 +5,7 @@ import { SEARCH_RESULT_LIMIT } from "../../constants";
 interface UseFileSearchParams {
 	workspaceId: string | undefined;
 	searchTerm: string;
+	includeHidden?: boolean;
 	includePattern?: string;
 	excludePattern?: string;
 	limit?: number;
@@ -13,6 +14,7 @@ interface UseFileSearchParams {
 export function useFileSearch({
 	workspaceId,
 	searchTerm,
+	includeHidden = false,
 	includePattern = "",
 	excludePattern = "",
 	limit = SEARCH_RESULT_LIMIT,
@@ -27,6 +29,7 @@ export function useFileSearch({
 			{
 				workspaceId: workspaceId ?? "",
 				query: debouncedQuery,
+				includeHidden,
 				includePattern,
 				excludePattern,
 				limit,
