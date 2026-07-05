@@ -44,6 +44,7 @@ interface ServerGroupRowProps {
 	onAddSpace: () => void;
 	onConnect: () => void;
 	onDisconnect: () => void;
+	onEdit: () => void;
 	onDelete: () => void;
 	isConnecting: boolean;
 }
@@ -56,6 +57,7 @@ export function ServerGroupRow({
 	onAddSpace,
 	onConnect,
 	onDisconnect,
+	onEdit,
 	onDelete,
 	isConnecting,
 }: ServerGroupRowProps) {
@@ -132,6 +134,11 @@ export function ServerGroupRow({
 						{isConnecting ? "Connecting…" : "Connect"}
 					</ContextMenuItem>
 				)}
+				<ContextMenuSeparator />
+				<ContextMenuItem onSelect={onEdit}>
+					<Pencil className="size-4 mr-2" />
+					Edit Connection
+				</ContextMenuItem>
 				<ContextMenuSeparator />
 				<ContextMenuItem
 					onSelect={onDelete}
@@ -268,19 +275,11 @@ export function ServerSpaceItem({
 	const [renameValue, setRenameValue] = useState(label);
 	const renameInputRef = useRef<HTMLInputElement | null>(null);
 
-	const isValidDirectory = (value: string) =>
-		!value.trim() ||
-		value.trim().startsWith("/") ||
-		value.trim().startsWith("~");
-
 	const shortenDirectory = (path: string) => {
 		const parts = path.replace(/\/+$/, "").split("/").filter(Boolean);
 		if (parts.length <= 2) return path;
 		return `/${parts.slice(-2).join("/")}`;
 	};
-
-	const isInputInvalid =
-		isEditingDirectory && !isValidDirectory(directoryValue);
 
 	useEffect(() => {
 		if (!isEditingDirectory) {
@@ -319,8 +318,7 @@ export function ServerSpaceItem({
 	}, [isRenamingLabel]);
 
 	const submitDirectory = () => {
-		if (!isValidDirectory(directoryValue)) return;
-		onSetDirectory(directoryValue || undefined);
+		onSetDirectory(directoryValue.trim() || undefined);
 		setIsEditingDirectory(false);
 	};
 
@@ -393,17 +391,12 @@ export function ServerSpaceItem({
 									}}
 									onClick={(event) => event.stopPropagation()}
 									onMouseDown={(event) => event.stopPropagation()}
-									placeholder="~/path/to/project"
-									className={cn(
-										"h-7 px-1 py-0 text-[13px] -ml-1",
-										isInputInvalid && "ring-1 ring-destructive",
-									)}
+									placeholder="dev/project"
+									className="h-7 px-1 py-0 text-[13px] -ml-1"
 								/>
-								{isInputInvalid && (
-									<span className="text-[11px] text-destructive leading-tight">
-										Must start with / or ~
-									</span>
-								)}
+								<span className="text-[11px] text-muted-foreground leading-tight">
+									Relative paths use the server base directory
+								</span>
 							</div>
 						) : isRenamingLabel ? (
 							<div className="flex min-w-0 flex-1 flex-col gap-1">

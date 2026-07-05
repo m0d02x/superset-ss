@@ -1,7 +1,7 @@
 import type { SelectServer } from "@superset/local-db";
 import { useMatchRoute, useNavigate } from "@tanstack/react-router";
 import { AnimatePresence, motion } from "framer-motion";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { env } from "renderer/env.renderer";
 import { electronTrpc } from "renderer/lib/electron-trpc";
 import { getLocalSpaceWorkspaceId } from "renderer/lib/local-space-workspace";
@@ -28,6 +28,7 @@ function ServerGroup({ server }: ServerGroupProps) {
 	} = useServersStore();
 
 	const isCollapsed = isServerCollapsed(server.id);
+	const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
 
 	const { data: spaces = [] } = electronTrpc.servers.listSpaces.useQuery(
 		{ serverId: server.id },
@@ -179,8 +180,15 @@ function ServerGroup({ server }: ServerGroupProps) {
 				onAddSpace={handleAddSpace}
 				onConnect={handleConnect}
 				onDisconnect={handleDisconnect}
+				onEdit={() => setIsEditDialogOpen(true)}
 				onDelete={handleDelete}
 				isConnecting={isConnecting}
+			/>
+
+			<AddServerDialog
+				open={isEditDialogOpen}
+				onOpenChange={setIsEditDialogOpen}
+				server={server}
 			/>
 
 			<AnimatePresence initial={false}>
@@ -449,8 +457,7 @@ function LiveDashboardSidebarServerSection() {
 		reconnectAll.mutate();
 	}, [servers.length, reconnectAll.mutate]);
 
-	const { isAddServerDialogOpen, openAddServerDialog, closeAddServerDialog } =
-		useServersStore();
+	const { isAddServerDialogOpen, closeAddServerDialog } = useServersStore();
 
 	return (
 		<div>

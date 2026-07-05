@@ -1,3 +1,4 @@
+import type { SelectServer } from "@superset/local-db";
 import type { ServerAuthMethod } from "@superset/local-db/schema/zod";
 import { Button } from "@superset/ui/button";
 import {
@@ -17,22 +18,35 @@ import {
 	SelectValue,
 } from "@superset/ui/select";
 import type React from "react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { electronTrpc } from "renderer/lib/electron-trpc";
 
 interface AddServerDialogProps {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
+	server?: SelectServer;
 }
 
-export function AddServerDialog({ open, onOpenChange }: AddServerDialogProps) {
+function getDefaultHomeDirectory(username: string): string {
+	const trimmedUsername = username.trim();
+	if (!trimmedUsername || trimmedUsername === "root") return "/root";
+	return `/home/${trimmedUsername}`;
+}
+
+export function AddServerDialog({
+	open,
+	onOpenChange,
+	server,
+}: AddServerDialogProps) {
 	const utils = electronTrpc.useUtils();
+	const isEditing = !!server;
 	const [label, setLabel] = useState("");
 	const [host, setHost] = useState("");
 	const [port, setPort] = useState("22");
 	const [username, setUsername] = useState("root");
 	const [authMethod, setAuthMethod] = useState<ServerAuthMethod>("key");
 	const [sshKeyPath, setSshKeyPath] = useState("~/.ssh/id_ed25519");
+	const [homeDirectory, setHomeDirectory] = useState("/root");
 
 	const pickSSHKeyMutation = electronTrpc.servers.pickSSHKey.useMutation();
 
@@ -44,6 +58,30 @@ export function AddServerDialog({ open, onOpenChange }: AddServerDialogProps) {
 		},
 	});
 
+	const updateMutation = electronTrpc.servers.update.useMutation({
+		onSuccess: (updated) => {
+			utils.servers.list.invalidate();
+			if (updated) {
+				utils.servers.get.invalidate({ id: updated.id });
+			}
+			onOpenChange(false);
+		},
+	});
+
+	useEffect(() => {
+		if (open && server) {
+			setLabel(server.label);
+			setHost(server.host);
+			setPort(String(server.port));
+			setUsername(server.username);
+			setAuthMethod(server.authMethod ?? "key");
+			setSshKeyPath(server.sshKeyPath ?? "~/.ssh/id_ed25519");
+			setHomeDirectory(
+				server.homeDirectory ?? getDefaultHomeDirectory(server.username),
+			);
+		}
+	}, [open, server]);
+
 	const resetForm = () => {
 		setLabel("");
 		setHost("");
@@ -51,25 +89,35 @@ export function AddServerDialog({ open, onOpenChange }: AddServerDialogProps) {
 		setUsername("root");
 		setAuthMethod("key");
 		setSshKeyPath("~/.ssh/id_ed25519");
+		setHomeDirectory("/root");
 	};
+
+	const isPending = createMutation.isPending || updateMutation.isPending;
 
 	const handleSubmit = (e: React.FormEvent) => {
 		e.preventDefault();
-		createMutation.mutate({
+		const values = {
 			label: label || host,
 			host,
 			port: Number.parseInt(port, 10) || 22,
 			username,
 			authMethod,
 			sshKeyPath: authMethod === "key" ? sshKeyPath : null,
-		});
+			homeDirectory: homeDirectory.trim() || null,
+		};
+
+		if (server) {
+			updateMutation.mutate({ id: server.id, ...values });
+		} else {
+			createMutation.mutate(values);
+		}
 	};
 
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
 			<DialogContent className="sm:max-w-md">
 				<DialogHeader>
-					<DialogTitle>Add Server</DialogTitle>
+					<DialogTitle>{isEditing ? "Edit Server" : "Add Server"}</DialogTitle>
 				</DialogHeader>
 
 				<form onSubmit={handleSubmit} className="space-y-4">
@@ -118,9 +166,14 @@ export function AddServerDialog({ open, onOpenChange }: AddServerDialogProps) {
 								<Input
 									id="server-username"
 									value={username}
-									onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-										setUsername(e.target.value)
-									}
+									onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+										const nextUsername = e.target.value;
+										const currentDefault = getDefaultHomeDirectory(username);
+										setUsername(nextUsername);
+										if (!homeDirectory || homeDirectory === currentDefault) {
+											setHomeDirectory(getDefaultHomeDirectory(nextUsername));
+										}
+									}}
 								/>
 							</div>
 							<div className="space-y-1.5">
@@ -170,6 +223,22 @@ export function AddServerDialog({ open, onOpenChange }: AddServerDialogProps) {
 								</div>
 							</div>
 						)}
+
+						<div className="space-y-1.5">
+							<Label htmlFor="server-homeDirectory">Base Directory</Label>
+							<Input
+								id="server-homeDirectory"
+								placeholder="/home/ubuntu"
+								value={homeDirectory}
+								onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+									setHomeDirectory(e.target.value)
+								}
+							/>
+							<p className="text-xs text-muted-foreground">
+								Space directories are resolved from here. Example: /dev/project
+								→ /home/ubuntu/dev/project.
+							</p>
+						</div>
 					</div>
 
 					<DialogFooter>
@@ -180,8 +249,14 @@ export function AddServerDialog({ open, onOpenChange }: AddServerDialogProps) {
 						>
 							Cancel
 						</Button>
-						<Button type="submit" disabled={!host || createMutation.isPending}>
-							{createMutation.isPending ? "Adding..." : "Add Server"}
+						<Button type="submit" disabled={!host || isPending}>
+							{isEditing
+								? isPending
+									? "Saving..."
+									: "Save Changes"
+								: isPending
+									? "Adding..."
+									: "Add Server"}
 						</Button>
 					</DialogFooter>
 				</form>

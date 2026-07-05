@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import {
 	containsClearScrollbackSequence,
 	extractContentAfterClear,
+	stripTerminalAutoResponses,
 } from "./terminal-escape-filter";
 
 const ESC = "\x1b";
@@ -135,5 +136,25 @@ describe("extractContentAfterClear", () => {
 			// ESC[3 (without J) is not a clear sequence
 			expect(extractContentAfterClear(`${ESC}[3mtext`)).toBe(`${ESC}[3mtext`);
 		});
+	});
+});
+
+describe("stripTerminalAutoResponses", () => {
+	it("removes xterm.js tmux startup replies while preserving user input", () => {
+		const data = `ls${ESC}[>0;276;0c${ESC}]10;rgb:f5f5/efef/e9e9${ESC}\\${ESC}]11;rgb:1414/1010/0f0f${ESC}\\\n`;
+
+		expect(stripTerminalAutoResponses(data)).toBe("ls\n");
+	});
+
+	it("removes complete standalone replies", () => {
+		expect(
+			stripTerminalAutoResponses(`${ESC}]>0;xterm.js(6.1.0-beta.195)${ESC}\\`),
+		).toBe("");
+		expect(
+			stripTerminalAutoResponses(`${ESC}]10;rgb:f5f5/efef/e9e9${ESC}\\`),
+		).toBe("");
+		expect(
+			stripTerminalAutoResponses(`${ESC}]11;rgb:1414/1010/0f0f${ESC}\\`),
+		).toBe("");
 	});
 });

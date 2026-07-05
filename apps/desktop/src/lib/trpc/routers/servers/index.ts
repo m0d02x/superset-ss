@@ -1,3 +1,6 @@
+import type { Stats } from "node:fs";
+import { stat } from "node:fs/promises";
+import { basename, dirname } from "node:path";
 import {
 	projects,
 	type SelectProject,
@@ -13,10 +16,49 @@ import { eq } from "drizzle-orm";
 import { dialog } from "electron";
 import { localDb } from "main/lib/local-db";
 import { getSSHConnectionManager } from "main/lib/ssh-connection-manager";
+import { stripTerminalAutoResponses } from "main/lib/terminal-escape-filter";
+import { resolveServerSpaceDirectory } from "shared/server-paths";
 import { z } from "zod";
 import { publicProcedure, router } from "../..";
 
 let hasRegisteredServerStatusPersistence = false;
+
+function registerServerStatusPersistence(): void {
+	if (hasRegisteredServerStatusPersistence) {
+		return;
+	}
+	const manager = getSSHConnectionManager();
+	manager.on("statusChange", persistServerStatus);
+	hasRegisteredServerStatusPersistence = true;
+}
+
+async function resolveRenamedRemotePath(
+	manager: ReturnType<typeof getSSHConnectionManager>,
+	serverId: string,
+	targetPath: string,
+): Promise<string> {
+	const extensionIndex = targetPath.lastIndexOf(".");
+	const slashIndex = targetPath.lastIndexOf("/");
+	const hasExtension = extensionIndex > slashIndex;
+	const basePath = hasExtension
+		? targetPath.slice(0, extensionIndex)
+		: targetPath;
+	const extension = hasExtension ? targetPath.slice(extensionIndex) : "";
+
+	for (let attempt = 1; attempt <= 100; attempt += 1) {
+		const candidatePath = `${basePath} (${attempt})${extension}`;
+		const existsResult = await manager.exec(
+			serverId,
+			`if [ -e ${JSON.stringify(candidatePath)} ]; then exit 0; else exit 1; fi`,
+		);
+
+		if (existsResult.code !== 0) {
+			return candidatePath;
+		}
+	}
+
+	throw new Error("Could not find an available renamed upload path");
+}
 
 function persistServerStatus(event: {
 	serverId: string;
@@ -85,6 +127,7 @@ const createServerInput = z.object({
 	username: z.string().min(1).default("root"),
 	authMethod: z.enum(SERVER_AUTH_METHODS).default("key"),
 	sshKeyPath: z.string().nullable().optional(),
+	homeDirectory: z.string().nullable().optional(),
 });
 
 const updateServerInput = z.object({
@@ -95,14 +138,79 @@ const updateServerInput = z.object({
 	username: z.string().min(1).optional(),
 	authMethod: z.enum(SERVER_AUTH_METHODS).optional(),
 	sshKeyPath: z.string().nullable().optional(),
+	homeDirectory: z.string().nullable().optional(),
 });
 
+function normalizeOptionalPath(path: string | null | undefined): string | null {
+	const trimmed = path?.trim();
+	return trimmed ? trimmed : null;
+}
+
+function getServerHomeDirectory(serverId: string): string | null {
+	const server = localDb
+		.select({ homeDirectory: servers.homeDirectory })
+		.from(servers)
+		.where(eq(servers.id, serverId))
+		.get();
+
+	return server?.homeDirectory ?? null;
+}
+
+function resolveSpaceDirectory(
+	directory: string | null | undefined,
+	serverId: string,
+): string | null {
+	return (
+		resolveServerSpaceDirectory(directory, getServerHomeDirectory(serverId)) ??
+		null
+	);
+}
+
+/**
+ * Reconnect all servers that were previously connected. Called from app
+ * startup (main process) so SSH connections resume without waiting for
+ * the renderer, and from the `reconnectAll` mutation.
+ */
+export async function reconnectAllServers(): Promise<
+	Array<{ id: string; success: boolean; error?: string }>
+> {
+	registerServerStatusPersistence();
+	const allServers = localDb.select().from(servers).all();
+	const manager = getSSHConnectionManager();
+
+	const results = await Promise.all(
+		allServers
+			.filter((server) => server.lastConnectedAt)
+			.map(async (server) => {
+				try {
+					if (manager.isConnected(server.id)) {
+						return { id: server.id, success: true };
+					}
+
+					await reconnectServer(server.id);
+					return { id: server.id, success: true };
+				} catch (error) {
+					const message =
+						error instanceof Error ? error.message : "Unknown error";
+					localDb
+						.update(servers)
+						.set({
+							status: "error",
+							statusMessage: message,
+							updatedAt: Date.now(),
+						})
+						.where(eq(servers.id, server.id))
+						.run();
+					return { id: server.id, success: false, error: message };
+				}
+			}),
+	);
+
+	return results;
+}
+
 export const createServersRouter = () => {
-	if (!hasRegisteredServerStatusPersistence) {
-		const manager = getSSHConnectionManager();
-		manager.on("statusChange", persistServerStatus);
-		hasRegisteredServerStatusPersistence = true;
-	}
+	registerServerStatusPersistence();
 
 	return router({
 		list: publicProcedure.query(() => {
@@ -129,6 +237,7 @@ export const createServersRouter = () => {
 					username: input.username,
 					authMethod: input.authMethod,
 					sshKeyPath: input.sshKeyPath ?? undefined,
+					homeDirectory: normalizeOptionalPath(input.homeDirectory),
 				})
 				.returning()
 				.get();
@@ -138,7 +247,14 @@ export const createServersRouter = () => {
 			const { id, ...updates } = input;
 			return localDb
 				.update(servers)
-				.set({ ...updates, updatedAt: Date.now() })
+				.set({
+					...updates,
+					homeDirectory:
+						"homeDirectory" in updates
+							? normalizeOptionalPath(updates.homeDirectory)
+							: undefined,
+					updatedAt: Date.now(),
+				})
 				.where(eq(servers.id, id))
 				.returning()
 				.get();
@@ -356,42 +472,7 @@ export const createServersRouter = () => {
 			}),
 
 		/** Auto-reconnect all servers that have lastConnectedAt set */
-		reconnectAll: publicProcedure.mutation(async () => {
-			const allServers = localDb.select().from(servers).all();
-			const manager = getSSHConnectionManager();
-			const results: Array<{ id: string; success: boolean; error?: string }> =
-				[];
-
-			for (const server of allServers) {
-				// Only reconnect servers that were previously connected
-				if (!server.lastConnectedAt) continue;
-
-				try {
-					if (manager.isConnected(server.id)) {
-						manager.disconnect(server.id);
-					}
-
-					await reconnectServer(server.id);
-
-					results.push({ id: server.id, success: true });
-				} catch (error) {
-					const message =
-						error instanceof Error ? error.message : "Unknown error";
-					localDb
-						.update(servers)
-						.set({
-							status: "error",
-							statusMessage: message,
-							updatedAt: Date.now(),
-						})
-						.where(eq(servers.id, server.id))
-						.run();
-					results.push({ id: server.id, success: false, error: message });
-				}
-			}
-
-			return results;
-		}),
+		reconnectAll: publicProcedure.mutation(() => reconnectAllServers()),
 
 		/** Open a file picker for SSH key selection */
 		pickSSHKey: publicProcedure.mutation(async () => {
@@ -560,7 +641,9 @@ export const createServersRouter = () => {
 			.input(z.object({ sessionId: z.string(), data: z.string() }))
 			.mutation(({ input }) => {
 				const manager = getSSHConnectionManager();
-				manager.writeShell(input.sessionId, input.data);
+				const data = stripTerminalAutoResponses(input.data);
+				if (data.length === 0) return;
+				manager.writeShell(input.sessionId, data);
 			}),
 
 		/** Resize a shell session */
@@ -636,6 +719,17 @@ export const createServersRouter = () => {
 					}));
 			}),
 
+		createDirectory: publicProcedure
+			.input(z.object({ id: z.string(), path: z.string() }))
+			.mutation(async ({ input }) => {
+				const manager = getSSHConnectionManager();
+				const result = await manager.exec(
+					input.id,
+					`mkdir -p ${JSON.stringify(input.path)} 2>/dev/null`,
+				);
+				return { success: result.code === 0, error: result.stderr };
+			}),
+
 		/** Read a file on the remote server */
 		readFile: publicProcedure
 			.input(z.object({ id: z.string(), path: z.string() }))
@@ -662,12 +756,190 @@ export const createServersRouter = () => {
 			)
 			.mutation(async ({ input }) => {
 				const manager = getSSHConnectionManager();
-				// Use heredoc to avoid quoting issues
+				const pathLiteral = JSON.stringify(input.path);
 				const result = await manager.exec(
 					input.id,
-					`cat > ${JSON.stringify(input.path)} << 'SUPERSET_EOF'\n${input.content}\nSUPERSET_EOF`,
+					`TARGET=${pathLiteral}; DIR=$(dirname "$TARGET"); mkdir -p "$DIR" && if [ -e "$TARGET" ]; then echo "Path already exists" >&2; exit 1; fi && cat > "$TARGET" << 'SUPERSET_EOF'\n${input.content}\nSUPERSET_EOF`,
 				);
 				return { success: result.code === 0, error: result.stderr };
+			}),
+
+		renamePath: publicProcedure
+			.input(
+				z.object({
+					id: z.string(),
+					sourcePath: z.string(),
+					destinationPath: z.string(),
+				}),
+			)
+			.mutation(async ({ input }) => {
+				const manager = getSSHConnectionManager();
+				const destinationParentPath = dirname(input.destinationPath);
+				const result = await manager.exec(
+					input.id,
+					`DEST=${JSON.stringify(input.destinationPath)}; DEST_PARENT=${JSON.stringify(destinationParentPath)}; SRC=${JSON.stringify(input.sourcePath)}; mkdir -p "$DEST_PARENT" && if [ ! -e "$SRC" ]; then echo "Source path does not exist" >&2; exit 1; fi && if [ -e "$DEST" ]; then echo "Destination path already exists" >&2; exit 1; fi && mv "$SRC" "$DEST"`,
+				);
+				return { success: result.code === 0, error: result.stderr };
+			}),
+
+		deletePaths: publicProcedure
+			.input(
+				z.object({
+					id: z.string(),
+					paths: z.array(z.string()).min(1),
+				}),
+			)
+			.mutation(async ({ input }) => {
+				const manager = getSSHConnectionManager();
+				const deleted: string[] = [];
+				const failed: Array<{ path: string; error: string }> = [];
+
+				for (const path of input.paths) {
+					const result = await manager.exec(
+						input.id,
+						`TARGET=${JSON.stringify(path)}; if [ ! -e "$TARGET" ]; then echo "Path does not exist" >&2; exit 1; fi && rm -rf "$TARGET"`,
+					);
+
+					if (result.code === 0) {
+						deleted.push(path);
+						continue;
+					}
+
+					failed.push({
+						path,
+						error: result.stderr.trim() || "Delete failed",
+					});
+				}
+
+				return { deleted, failed };
+			}),
+
+		uploadFiles: publicProcedure
+			.input(
+				z.object({
+					id: z.string(),
+					targetPath: z.string(),
+					localPaths: z.array(z.string()).min(1),
+					conflictResolution: z
+						.enum(["skip", "overwrite", "rename"])
+						.optional(),
+					conflictLocalPaths: z.array(z.string()).optional(),
+				}),
+			)
+			.mutation(async ({ input }) => {
+				const manager = getSSHConnectionManager();
+				const uploaded: Array<{
+					localPath: string;
+					fileName: string;
+					remotePath: string;
+				}> = [];
+				const skipped: Array<{ localPath: string; reason: string }> = [];
+				const conflicts: Array<{
+					localPath: string;
+					fileName: string;
+					existingPath: string;
+					reason: string;
+				}> = [];
+				const conflictResolution = input.conflictResolution ?? "skip";
+				const conflictLocalPathSet = new Set(input.conflictLocalPaths ?? []);
+
+				for (const localPath of input.localPaths) {
+					let localStats: Stats;
+					try {
+						localStats = await stat(localPath);
+					} catch (error) {
+						skipped.push({
+							localPath,
+							reason:
+								error instanceof Error
+									? error.message
+									: "Could not read local file",
+						});
+						continue;
+					}
+
+					if (localStats.isDirectory()) {
+						skipped.push({
+							localPath,
+							reason: "Directory uploads are not supported yet",
+						});
+						continue;
+					}
+
+					if (!localStats.isFile()) {
+						skipped.push({
+							localPath,
+							reason: "Only regular files can be uploaded",
+						});
+						continue;
+					}
+
+					const fileName = basename(localPath);
+					const baseRemotePath = `${input.targetPath.replace(/\/+$/, "")}/${fileName}`;
+
+					const existsResult = await manager.exec(
+						input.id,
+						`if [ -e ${JSON.stringify(baseRemotePath)} ]; then exit 0; else exit 1; fi`,
+					);
+
+					if (existsResult.code === 0) {
+						if (
+							conflictResolution === "skip" ||
+							(input.conflictLocalPaths && !conflictLocalPathSet.has(localPath))
+						) {
+							conflicts.push({
+								localPath,
+								fileName,
+								existingPath: baseRemotePath,
+								reason: `Remote file already exists: ${fileName}`,
+							});
+							continue;
+						}
+					}
+
+					const remotePath =
+						existsResult.code === 0 && conflictResolution === "rename"
+							? await resolveRenamedRemotePath(
+									manager,
+									input.id,
+									baseRemotePath,
+								)
+							: baseRemotePath;
+
+					if (existsResult.code === 0 && conflictResolution === "overwrite") {
+						const removeResult = await manager.exec(
+							input.id,
+							`TARGET=${JSON.stringify(baseRemotePath)}; rm -rf "$TARGET"`,
+						);
+
+						if (removeResult.code !== 0) {
+							skipped.push({
+								localPath,
+								reason:
+									removeResult.stderr.trim() ||
+									"Failed to overwrite existing remote file",
+							});
+							continue;
+						}
+					}
+
+					try {
+						await manager.uploadFile(input.id, localPath, remotePath);
+						uploaded.push({ localPath, fileName, remotePath });
+					} catch (error) {
+						skipped.push({
+							localPath,
+							reason: error instanceof Error ? error.message : "Upload failed",
+						});
+					}
+				}
+
+				return {
+					targetPath: input.targetPath,
+					uploaded,
+					skipped,
+					conflicts,
+				};
 			}),
 
 		/** Get git status on the remote server */
@@ -741,7 +1013,7 @@ export const createServersRouter = () => {
 					.values({
 						serverId: input.serverId,
 						label: input.label,
-						directory: input.directory,
+						directory: resolveSpaceDirectory(input.directory, input.serverId),
 					})
 					.returning()
 					.get();
@@ -759,9 +1031,21 @@ export const createServersRouter = () => {
 			)
 			.mutation(({ input }) => {
 				const { id, ...updates } = input;
+				const currentSpace = localDb
+					.select({ serverId: serverSpaces.serverId })
+					.from(serverSpaces)
+					.where(eq(serverSpaces.id, id))
+					.get();
+				const directory = currentSpace
+					? resolveSpaceDirectory(updates.directory, currentSpace.serverId)
+					: null;
 				return localDb
 					.update(serverSpaces)
-					.set({ ...updates, updatedAt: Date.now() })
+					.set({
+						...updates,
+						directory: "directory" in updates ? directory : undefined,
+						updatedAt: Date.now(),
+					})
 					.where(eq(serverSpaces.id, id))
 					.returning()
 					.get();

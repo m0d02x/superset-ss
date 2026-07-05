@@ -1,6 +1,7 @@
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { settings } from "@superset/local-db";
+import { servers, settings } from "@superset/local-db";
+import { ne } from "drizzle-orm";
 import {
 	app,
 	BrowserWindow,
@@ -15,6 +16,7 @@ import {
 	handleAuthCallback,
 	parseAuthDeepLink,
 } from "lib/trpc/routers/auth/utils/auth-functions";
+import { reconnectAllServers } from "lib/trpc/routers/servers";
 import { applyShellEnvToProcess } from "lib/trpc/routers/workspaces/utils/shell-env";
 import {
 	DEFAULT_CONFIRM_ON_QUIT,
@@ -25,7 +27,6 @@ import { setupAgentHooks } from "./lib/agent-setup";
 import { initAppState } from "./lib/app-state";
 import { requestAppleEventsAccess } from "./lib/apple-events-permission";
 import { setupAutoUpdater } from "./lib/auto-updater";
-import { resolveDevWorkspaceName } from "./lib/dev-workspace-name";
 import { setWorkspaceDockIcon } from "./lib/dock-icon";
 import { loadWebviewBrowserExtension } from "./lib/extensions";
 import { getHostServiceManager } from "./lib/host-service-manager";
@@ -336,6 +337,16 @@ if (!gotTheLock) {
 		// Must happen before renderer restore runs
 		await reconcileDaemonSessions();
 		prewarmTerminalRuntime();
+
+		// Stale statuses from the previous run — nothing is connected yet
+		localDb
+			.update(servers)
+			.set({ status: "disconnected", statusMessage: null })
+			.where(ne(servers.status, "disconnected"))
+			.run();
+		void reconnectAllServers().catch((error) => {
+			console.error("[main] Failed to auto-reconnect servers:", error);
+		});
 
 		try {
 			setupAgentHooks();

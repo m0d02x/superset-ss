@@ -16,6 +16,15 @@ const ESC = "\x1b";
 const CLEAR_SCROLLBACK_PATTERN = new RegExp(`${ESC}\\[3J`);
 
 const ED3_SEQUENCE = `${ESC}[3J`;
+const STRING_TERMINATOR = "(?:\x07|\x1b\\\\)";
+const TERMINAL_AUTO_RESPONSE_PATTERN = new RegExp(
+	[
+		`${ESC}\\[[?>=!]?[0-9;]*[cnRySut]`,
+		`${ESC}\\](?:10|11|>)[^\\x07\\x1b]*${STRING_TERMINATOR}`,
+		`${ESC}P[^\\x1b]*${ESC}\\\\`,
+	].join("|"),
+	"g",
+);
 
 /**
  * Checks if data contains sequences that clear the scrollback buffer.
@@ -43,4 +52,8 @@ export function extractContentAfterClear(data: string): string {
 	}
 
 	return data.slice(ed3Index + ED3_SEQUENCE.length);
+}
+
+export function stripTerminalAutoResponses(data: string): string {
+	return data.replace(TERMINAL_AUTO_RESPONSE_PATTERN, "");
 }
