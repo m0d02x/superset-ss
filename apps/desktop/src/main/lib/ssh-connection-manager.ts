@@ -476,7 +476,9 @@ class SSHConnectionManager extends EventEmitter {
 	/**
 	 * Write the Hyperset-managed tmux config to the remote host.
 	 * Loaded via `-f` when the hyperset tmux server starts, so behavior
-	 * doesn't depend on the user's ~/.tmux.conf.
+	 * doesn't depend on the user's ~/.tmux.conf. tmux only reads `-f` at server
+	 * start, so an already-running server (sessions survive app restarts) is
+	 * reloaded in place; with no server running, source-file just fails.
 	 */
 	private async ensureTmuxConfig(serverId: string): Promise<void> {
 		const confDir = HYPERSET_TMUX_CONF.slice(
@@ -485,7 +487,7 @@ class SSHConnectionManager extends EventEmitter {
 		);
 		await this.exec(
 			serverId,
-			`mkdir -p ${confDir} && cat > ${HYPERSET_TMUX_CONF} <<'HYPERSET_EOF'\n${HYPERSET_TMUX_CONF_CONTENT}HYPERSET_EOF`,
+			`mkdir -p ${confDir} && cat > ${HYPERSET_TMUX_CONF} <<'HYPERSET_EOF'\n${HYPERSET_TMUX_CONF_CONTENT}HYPERSET_EOF\n${HYPERSET_TMUX} source-file ${HYPERSET_TMUX_CONF} 2>/dev/null || true`,
 		);
 	}
 

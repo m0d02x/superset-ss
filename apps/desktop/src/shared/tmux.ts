@@ -30,4 +30,8 @@ set -g allow-passthrough on
 set -g mouse on
 set -g history-limit 50000
 set -g default-terminal "xterm-256color"
+# Forward the active pane's title (agents like omp/Claude set it to the
+# session name) to the app, which uses it as the tab label.
+set -g set-titles on
+set -g set-titles-string "#{pane_title}"
 `;
