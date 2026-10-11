@@ -5,11 +5,13 @@ import {
 	type OpenWorkspaceEvent,
 	type SettingsSection,
 } from "main/lib/menu-events";
+import type { TerminalZoomAction } from "shared/terminal-zoom";
 import { publicProcedure, router } from "..";
 
 type MenuEvent =
 	| { type: "open-settings"; data: OpenSettingsEvent }
-	| { type: "open-workspace"; data: OpenWorkspaceEvent };
+	| { type: "open-workspace"; data: OpenWorkspaceEvent }
+	| { type: "terminal-zoom"; data: { action: TerminalZoomAction } };
 
 export const createMenuRouter = () => {
 	return router({
@@ -23,12 +25,18 @@ export const createMenuRouter = () => {
 					emit.next({ type: "open-workspace", data: { workspaceId } });
 				};
 
+				const onTerminalZoom = (action: TerminalZoomAction) => {
+					emit.next({ type: "terminal-zoom", data: { action } });
+				};
+
 				menuEmitter.on("open-settings", onOpenSettings);
 				menuEmitter.on("open-workspace", onOpenWorkspace);
+				menuEmitter.on("terminal-zoom", onTerminalZoom);
 
 				return () => {
 					menuEmitter.off("open-settings", onOpenSettings);
 					menuEmitter.off("open-workspace", onOpenWorkspace);
+					menuEmitter.off("terminal-zoom", onTerminalZoom);
 				};
 			});
 		}),

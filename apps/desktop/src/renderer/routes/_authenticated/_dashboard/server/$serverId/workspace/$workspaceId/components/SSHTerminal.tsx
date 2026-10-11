@@ -6,6 +6,7 @@ import { Terminal as XTerm } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { debounce } from "lodash";
 import { useCallback, useEffect, useRef } from "react";
+import { useTerminalFont } from "renderer/hooks/useTerminalFont";
 import { electronTrpc } from "renderer/lib/electron-trpc";
 import { RESIZE_DEBOUNCE_MS } from "renderer/screens/main/components/WorkspaceView/ContentView/TabsContent/Terminal/config";
 import {
@@ -22,7 +23,6 @@ import {
 	getRemoteTerminalSnapshot,
 	saveRemoteTerminalSnapshot,
 } from "renderer/stores/remote-sessions/view-state";
-import { useTerminalFont } from "../../../hooks/useTerminalFont";
 import { setupRemoteImagePaste } from "../../../utils/setupRemoteImagePaste";
 
 interface SSHTerminalProps {

@@ -68,9 +68,31 @@ export function createApplicationMenu() {
 				{ role: "forceReload" },
 				{ role: "toggleDevTools" },
 				{ type: "separator" },
-				{ role: "resetZoom" },
-				{ role: "zoomIn" },
-				{ role: "zoomOut" },
+				// Zoom scales terminal text only. The built-in zoom roles would
+				// scale the whole app UI.
+				{
+					label: "Reset Terminal Zoom",
+					accelerator: "CommandOrControl+0",
+					click: () => menuEmitter.emit("terminal-zoom", "reset"),
+				},
+				{
+					label: "Zoom In Terminal",
+					accelerator: "CommandOrControl+Plus",
+					click: () => menuEmitter.emit("terminal-zoom", "in"),
+				},
+				// Hidden twin so ⌘= (no Shift) also zooms in, like browsers.
+				{
+					label: "Zoom In Terminal",
+					accelerator: "CommandOrControl+=",
+					visible: false,
+					acceleratorWorksWhenHidden: true,
+					click: () => menuEmitter.emit("terminal-zoom", "in"),
+				},
+				{
+					label: "Zoom Out Terminal",
+					accelerator: "CommandOrControl+-",
+					click: () => menuEmitter.emit("terminal-zoom", "out"),
+				},
 				{ type: "separator" },
 				{ role: "togglefullscreen" },
 			],

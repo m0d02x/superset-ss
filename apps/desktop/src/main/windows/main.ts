@@ -244,7 +244,6 @@ export async function MainWindow() {
 				width: bounds.width,
 				height: bounds.height,
 				isMaximized,
-				zoomLevel: window.webContents.getZoomLevel(),
 			});
 		}, 500);
 	};
@@ -255,9 +254,6 @@ export async function MainWindow() {
 		console.log("[main-window] Renderer loaded successfully");
 		if (initialBounds.isMaximized) {
 			window.maximize();
-		}
-		if (savedWindowState?.zoomLevel !== undefined) {
-			window.webContents.setZoomLevel(savedWindowState.zoomLevel);
 		}
 		window.show();
 		initialized = true;
@@ -299,14 +295,12 @@ export async function MainWindow() {
 		// Save window state first, before any cleanup
 		const isMaximized = window.isMaximized();
 		const bounds = isMaximized ? window.getNormalBounds() : window.getBounds();
-		const zoomLevel = window.webContents.getZoomLevel();
 		saveWindowState({
 			x: bounds.x,
 			y: bounds.y,
 			width: bounds.width,
 			height: bounds.height,
 			isMaximized,
-			zoomLevel,
 		});
 
 		browserManager.unregisterAll();

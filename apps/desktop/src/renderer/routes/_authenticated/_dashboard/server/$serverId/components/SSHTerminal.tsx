@@ -5,6 +5,7 @@ import { SerializeAddon } from "@xterm/addon-serialize";
 import { Terminal as XTerm } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { useCallback, useEffect, useRef } from "react";
+import { useTerminalFont } from "renderer/hooks/useTerminalFont";
 import { electronTrpc } from "renderer/lib/electron-trpc";
 import {
 	buildRemoteSessionKey,
@@ -15,7 +16,6 @@ import {
 	getRemoteTerminalSnapshot,
 	saveRemoteTerminalSnapshot,
 } from "renderer/stores/remote-sessions/view-state";
-import { useTerminalFont } from "../hooks/useTerminalFont";
 import { setupRemoteImagePaste } from "../utils/setupRemoteImagePaste";
 
 interface SSHTerminalProps {
@@ -206,7 +206,9 @@ export function SSHTerminal({
 	useEffect(() => {
 		let cancelled = false;
 
-		const tmuxName = tmuxSessionOverride ?? (spaceId ? `ss-${spaceId}-${terminalId}` : `ss-${terminalId}`);
+		const tmuxName =
+			tmuxSessionOverride ??
+			(spaceId ? `ss-${spaceId}-${terminalId}` : `ss-${terminalId}`);
 		void acquireSession({
 			key: cacheKey,
 			serverId,
@@ -387,7 +389,9 @@ export function SSHTerminal({
 							key: cacheKey,
 							serverId,
 							cwd: initialCwdRef.current,
-							tmuxSession: tmuxSessionOverride ?? (spaceId ? `ss-${spaceId}-${terminalId}` : `ss-${terminalId}`),
+							tmuxSession:
+								tmuxSessionOverride ??
+								(spaceId ? `ss-${spaceId}-${terminalId}` : `ss-${terminalId}`),
 						}).catch((error) => {
 							terminalRef.current?.writeln(
 								`\r\n\x1b[31mFailed to reopen shell: ${error instanceof Error ? error.message : String(error)}\x1b[0m`,

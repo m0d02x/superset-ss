@@ -3,6 +3,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Terminal as XTerm } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { useEffect, useRef, useState } from "react";
+import { useTerminalFont } from "renderer/hooks/useTerminalFont";
 import { useWorkspaceWsUrl } from "../../../providers/WorkspaceTrpcProvider/WorkspaceTrpcProvider";
 
 interface WorkspaceTerminalProps {
@@ -26,6 +27,12 @@ type TerminalServerMessage =
 
 export function WorkspaceTerminal({ workspaceId }: WorkspaceTerminalProps) {
 	const containerRef = useRef<HTMLDivElement | null>(null);
+	const terminalRef = useRef<XTerm | null>(null);
+	const fitAddonRef = useRef<FitAddon | null>(null);
+	const terminalFont = useTerminalFont(terminalRef, fitAddonRef);
+	// Initial font for xterm construction; later changes apply via the hook.
+	const terminalFontRef = useRef(terminalFont);
+	terminalFontRef.current = terminalFont;
 	const [connectionState, setConnectionState] = useState<
 		"connecting" | "open" | "closed"
 	>("connecting");
@@ -44,14 +51,14 @@ export function WorkspaceTerminal({ workspaceId }: WorkspaceTerminalProps) {
 		const fitAddon = new FitAddon();
 		const terminal = new XTerm({
 			cursorBlink: true,
-			fontFamily:
-				'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-			fontSize: 12,
+			...terminalFontRef.current,
 			theme: {
 				background: "#14100f",
 				foreground: "#f5efe9",
 			},
 		});
+		terminalRef.current = terminal;
+		fitAddonRef.current = fitAddon;
 		terminal.loadAddon(fitAddon);
 		terminal.open(container);
 		fitAddon.fit();
@@ -135,6 +142,8 @@ export function WorkspaceTerminal({ workspaceId }: WorkspaceTerminalProps) {
 			onTerminalDataDispose.dispose();
 			socket.close();
 			terminal.dispose();
+			terminalRef.current = null;
+			fitAddonRef.current = null;
 		};
 	}, [websocketUrl]);
 

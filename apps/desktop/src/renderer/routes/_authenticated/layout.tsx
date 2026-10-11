@@ -13,6 +13,7 @@ import { NewWorkspaceModal } from "renderer/components/NewWorkspaceModal";
 import { Paywall } from "renderer/components/Paywall";
 import { useUpdateListener } from "renderer/components/UpdateToast";
 import { env } from "renderer/env.renderer";
+import { useTerminalZoom } from "renderer/hooks/useTerminalZoom";
 import { authClient, getAuthToken } from "renderer/lib/auth-client";
 import { dragDropManager } from "renderer/lib/dnd";
 import { electronTrpc } from "renderer/lib/electron-trpc";
@@ -117,6 +118,7 @@ function LiveAuthenticatedLayout() {
 	});
 
 	// Menu navigation subscription
+	const zoomTerminal = useTerminalZoom();
 	electronTrpc.menu.subscribe.useSubscription(undefined, {
 		onData: (event) => {
 			if (event.type === "open-settings") {
@@ -124,6 +126,8 @@ function LiveAuthenticatedLayout() {
 				navigate({ to: `/settings/${section}` as "/settings/account" });
 			} else if (event.type === "open-workspace") {
 				navigate({ to: `/workspace/${event.data.workspaceId}` });
+			} else if (event.type === "terminal-zoom") {
+				zoomTerminal(event.data.action);
 			}
 		},
 	});
@@ -221,6 +225,7 @@ function SkipModeAuthenticatedLayout() {
 		},
 	});
 
+	const zoomTerminal = useTerminalZoom();
 	electronTrpc.menu.subscribe.useSubscription(undefined, {
 		onData: (event) => {
 			if (event.type === "open-settings") {
@@ -228,6 +233,8 @@ function SkipModeAuthenticatedLayout() {
 				navigate({ to: `/settings/${section}` as "/settings/account" });
 			} else if (event.type === "open-workspace") {
 				navigate({ to: `/workspace/${event.data.workspaceId}` });
+			} else if (event.type === "terminal-zoom") {
+				zoomTerminal(event.data.action);
 			}
 		},
 	});
