@@ -18,7 +18,12 @@ import { dialog } from "electron";
 import { localDb } from "main/lib/local-db";
 import { getSSHConnectionManager } from "main/lib/ssh-connection-manager";
 import { stripTerminalAutoResponses } from "main/lib/terminal-escape-filter";
+import {
+	buildServerActivityCommand,
+	parseServerActivity,
+} from "shared/server-activity";
 import { resolveServerSpaceDirectory } from "shared/server-paths";
+import { HYPERSET_TMUX } from "shared/tmux";
 import { z } from "zod";
 import { publicProcedure, router } from "../..";
 
@@ -683,10 +688,10 @@ export const createServersRouter = () => {
 
 				// "image/svg+xml" → "svg"; anything unrecognisable falls back to png.
 				const extension =
-					input.mimeType.slice("image/".length).split("+")[0]?.replace(
-						/[^a-z0-9]/gi,
-						"",
-					) || "png";
+					input.mimeType
+						.slice("image/".length)
+						.split("+")[0]
+						?.replace(/[^a-z0-9]/gi, "") || "png";
 				const stamp = new Date().toISOString().replace(/[:.]/g, "-");
 				const remotePath = `${home}/.hyperset/clipboard/paste-${stamp}.${extension}`;
 				await manager.writeRemoteBuffer(
@@ -1093,6 +1098,23 @@ export const createServersRouter = () => {
 			.mutation(({ input }) => {
 				localDb.delete(serverSpaces).where(eq(serverSpaces.id, input.id)).run();
 				return { success: true };
+			}),
+
+		/**
+		 * Live activity of every Hyperset terminal on a server, from one tmux
+		 * query: which program each terminal runs and whether it is producing
+		 * output. Returns an empty list when the server is not connected.
+		 */
+		getActivity: publicProcedure
+			.input(z.object({ serverId: z.string() }))
+			.query(async ({ input }) => {
+				const manager = getSSHConnectionManager();
+				if (!manager.isConnected(input.serverId)) return [];
+				const result = await manager.exec(
+					input.serverId,
+					buildServerActivityCommand(HYPERSET_TMUX),
+				);
+				return parseServerActivity(result.stdout);
 			}),
 
 		listTerminalSessions: publicProcedure

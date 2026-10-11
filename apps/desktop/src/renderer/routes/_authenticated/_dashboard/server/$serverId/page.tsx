@@ -22,6 +22,8 @@ import {
 	useServersStore,
 } from "renderer/stores/servers-state";
 import { buildRestoredServerTerminals } from "shared/server-terminal-sessions";
+import { getSpaceDisplayLabels } from "shared/space-display";
+import { normalizeTerminalTitle } from "shared/terminal-title";
 import { HYPERSET_SESSION_PREFIX, HYPERSET_TMUX } from "shared/tmux";
 import { GhosttySSHTerminal } from "./components/GhosttySSHTerminal";
 import { SSHTerminal } from "./components/SSHTerminal";
@@ -123,7 +125,9 @@ function ServerPage() {
 	const execMutation = electronTrpc.servers.exec.useMutation();
 	const execServerCommand = execMutation.mutateAsync;
 	const restoredSpacesRef = useRef<Set<string>>(new Set());
-	const explicitTitlesRef = useRef<Set<string>>(new Set());
+	// Terminals whose tab label came from an agent session title (omp, Claude…).
+	// Agent titles stick: a later shell prompt title must not overwrite them.
+	const agentTitledRef = useRef<Set<string>>(new Set());
 
 	// Restore tabs from existing tmux sessions on the server
 	useEffect(() => {
@@ -146,8 +150,16 @@ function ServerPage() {
 				),
 				restored.selectedTerminalId,
 			);
+			// Saved labels without a path separator came from an agent title
+			// (shell titles look like `dev/claix-dev`); keep them sticky.
+			// Default "Terminal N" labels are not session titles.
 			for (const terminal of restored.terminals) {
-				explicitTitlesRef.current.add(terminal.id);
+				if (
+					!terminal.label.includes("/") &&
+					!/^Terminal \d+$/.test(terminal.label)
+				) {
+					agentTitledRef.current.add(terminal.id);
+				}
 			}
 			return;
 		}
@@ -216,10 +228,10 @@ function ServerPage() {
 
 				// Apply tmux pane titles to restored tabs
 				for (const { id, paneTitle } of toRestore) {
-					if (paneTitle) {
-						setTerminalLabel(spaceId, id, paneTitle);
-						explicitTitlesRef.current.add(id);
-					}
+					const title = normalizeTerminalTitle(paneTitle);
+					if (title.kind === "empty") continue;
+					setTerminalLabel(spaceId, id, title.label);
+					if (title.kind === "agent") agentTitledRef.current.add(id);
 				}
 			})
 			.catch(() => {
@@ -246,6 +258,13 @@ function ServerPage() {
 	const activeSpace = useMemo(() => {
 		return spaces.find((s) => s.id === spaceId) || null;
 	}, [spaces, spaceId]);
+	// Same label the sidebar shows (folder name for unnamed spaces).
+	const activeSpaceLabel = useMemo(
+		() =>
+			(spaceId && getSpaceDisplayLabels(spaces).get(spaceId)) ||
+			activeSpace?.label,
+		[spaces, spaceId, activeSpace],
+	);
 
 	const tabs = useMemo(() => {
 		if (!spaceId) return [];
@@ -403,7 +422,7 @@ function ServerPage() {
 			const terminal = addTerminalToSpace(spaceId);
 			if (sessionTitle) {
 				setTerminalLabel(spaceId, terminal.id, sessionTitle);
-				explicitTitlesRef.current.add(terminal.id);
+				agentTitledRef.current.add(terminal.id);
 			}
 			// Override the tmux session name for this terminal
 			// We store it so acquireSession uses the external session name
@@ -788,7 +807,7 @@ function ServerPage() {
 					<div className="flex shrink-0 items-center gap-2 border-l border-border px-3">
 						<div className="size-1.5 rounded-full bg-emerald-500" />
 						<span className="text-[10px] text-muted-foreground">
-							{activeSpace.label} · {server.label}
+							{activeSpaceLabel} · {server.label}
 						</span>
 					</div>
 				</div>
@@ -818,20 +837,19 @@ function ServerPage() {
 										)}
 										onCwdChange={(cwd) => {
 											setTerminalCwd(tab.id, cwd);
-											if (!explicitTitlesRef.current.has(tab.id)) {
-												const dirName = cwd.split("/").filter(Boolean).pop();
-												if (dirName) {
-													setTerminalLabel(sid, tab.id, dirName);
-													persistTerminalLabel(sid, tab.id, dirName);
-												}
-											}
 										}}
-										onTitleChange={(title) => {
-											if (title) {
-												setTerminalLabel(sid, tab.id, title);
-												explicitTitlesRef.current.add(tab.id);
-												persistTerminalLabel(sid, tab.id, title);
+										onTitleChange={(rawTitle) => {
+											const title = normalizeTerminalTitle(rawTitle);
+											if (title.kind === "empty") return;
+											if (title.kind === "agent") {
+												agentTitledRef.current.add(tab.id);
+											} else if (agentTitledRef.current.has(tab.id)) {
+												// Agent exited back to the shell: keep its session name.
+												return;
 											}
+											if (title.label === tab.label) return;
+											setTerminalLabel(sid, tab.id, title.label);
+											persistTerminalLabel(sid, tab.id, title.label);
 										}}
 									/>
 								</div>

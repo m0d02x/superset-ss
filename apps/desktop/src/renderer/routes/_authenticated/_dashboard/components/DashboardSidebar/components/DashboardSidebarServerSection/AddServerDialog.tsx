@@ -20,17 +20,12 @@ import {
 import type React from "react";
 import { useEffect, useState } from "react";
 import { electronTrpc } from "renderer/lib/electron-trpc";
+import { getDefaultHomeDirectory } from "shared/space-display";
 
 interface AddServerDialogProps {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
 	server?: SelectServer;
-}
-
-function getDefaultHomeDirectory(username: string): string {
-	const trimmedUsername = username.trim();
-	if (!trimmedUsername || trimmedUsername === "root") return "/root";
-	return `/home/${trimmedUsername}`;
 }
 
 export function AddServerDialog({

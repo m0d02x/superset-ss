@@ -17,6 +17,11 @@ import { FolderOpen, Palette, Pencil, SquareTerminal } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { HiChevronRight, HiMiniPlus, HiMiniXMark } from "react-icons/hi2";
 import { LuPlug, LuTrash2, LuUnplug } from "react-icons/lu";
+import { CloseSpaceDialog } from "./CloseSpaceDialog";
+import {
+	SpaceActivityBadge,
+	type SpaceRowActivity,
+} from "./SpaceActivityBadge";
 
 function StatusDot({ status }: { status: SelectServer["status"] }) {
 	const colors: Record<string, string> = {
@@ -40,6 +45,10 @@ interface ServerGroupRowProps {
 	server: SelectServer;
 	isCollapsed: boolean;
 	spaceCount: number;
+	/** Shown while collapsed so activity stays visible. */
+	collapsedActivity?: SpaceRowActivity;
+	/** Disambiguates servers that share a label, e.g. `ubuntu@139.99.62.4`. */
+	hostHint?: string;
 	onToggleCollapse: () => void;
 	onAddSpace: () => void;
 	onConnect: () => void;
@@ -53,6 +62,8 @@ export function ServerGroupRow({
 	server,
 	isCollapsed,
 	spaceCount,
+	collapsedActivity,
+	hostHint,
 	onToggleCollapse,
 	onAddSpace,
 	onConnect,
@@ -75,9 +86,19 @@ export function ServerGroupRow({
 			>
 				<StatusDot status={server.status} />
 				<span className="truncate">{server.label}</span>
+				{hostHint && (
+					<span className="truncate text-xs font-normal text-muted-foreground">
+						{hostHint}
+					</span>
+				)}
 				<span className="text-xs font-normal tabular-nums text-muted-foreground">
 					({spaceCount})
 				</span>
+				{isCollapsed && collapsedActivity && (
+					<span className="ml-auto font-normal">
+						<SpaceActivityBadge {...collapsedActivity} />
+					</span>
+				)}
 			</button>
 
 			<Tooltip delayDuration={500}>
@@ -156,6 +177,7 @@ interface LocalServerRowProps {
 	isCollapsed: boolean;
 	spaceCount: number;
 	isActive: boolean;
+	collapsedActivity?: SpaceRowActivity;
 	onToggleCollapse: () => void;
 	onAddSpace: () => void;
 }
@@ -164,6 +186,7 @@ export function LocalServerRow({
 	isCollapsed,
 	spaceCount,
 	isActive,
+	collapsedActivity,
 	onToggleCollapse,
 	onAddSpace,
 }: LocalServerRowProps) {
@@ -187,6 +210,11 @@ export function LocalServerRow({
 					<span className="text-xs font-normal tabular-nums text-muted-foreground">
 						({spaceCount})
 					</span>
+					{isCollapsed && collapsedActivity && (
+						<span className="ml-auto font-normal">
+							<SpaceActivityBadge {...collapsedActivity} />
+						</span>
+					)}
 				</button>
 
 				<Tooltip delayDuration={500}>
@@ -241,12 +269,21 @@ const SPACE_COLORS = [
 ] as const;
 
 interface ServerSpaceItemProps {
-	serverId: string;
-	spaceId: string;
+	/** Display label (custom name, or folder-derived). */
 	label: string;
+	/** The name the user typed, used to prefill rename. Empty when unnamed. */
+	customLabel: string;
+	/** Raw directory as entered (editable value). */
 	directory?: string;
+	/** Compact path shown under the label, e.g. `~/dev/claix-dev`. */
+	displayDirectory?: string;
+	/** Full resolved path, shown on hover. */
+	fullDirectory?: string;
 	color?: string;
 	isActive: boolean;
+	activity?: SpaceRowActivity;
+	/** Live terminals that closing would end; > 0 asks for confirmation. */
+	runningTerminalCount: number;
 	onSelect: () => void;
 	onClose: () => void;
 	onSetDirectory: (directory: string | undefined) => void;
@@ -255,12 +292,15 @@ interface ServerSpaceItemProps {
 }
 
 export function ServerSpaceItem({
-	serverId: _serverId,
-	spaceId: _spaceId,
 	label,
+	customLabel,
 	directory,
+	displayDirectory,
+	fullDirectory,
 	color,
 	isActive,
+	activity,
+	runningTerminalCount,
 	onSelect,
 	onClose,
 	onSetDirectory,
@@ -272,14 +312,9 @@ export function ServerSpaceItem({
 	const inputRef = useRef<HTMLInputElement | null>(null);
 
 	const [isRenamingLabel, setIsRenamingLabel] = useState(false);
-	const [renameValue, setRenameValue] = useState(label);
+	const [renameValue, setRenameValue] = useState(customLabel);
 	const renameInputRef = useRef<HTMLInputElement | null>(null);
-
-	const shortenDirectory = (path: string) => {
-		const parts = path.replace(/\/+$/, "").split("/").filter(Boolean);
-		if (parts.length <= 2) return path;
-		return `/${parts.slice(-2).join("/")}`;
-	};
+	const [isConfirmingClose, setIsConfirmingClose] = useState(false);
 
 	useEffect(() => {
 		if (!isEditingDirectory) {
@@ -337,7 +372,7 @@ export function ServerSpaceItem({
 	};
 
 	const cancelRename = () => {
-		setRenameValue(label);
+		setRenameValue(customLabel);
 		setIsRenamingLabel(false);
 	};
 
@@ -345,194 +380,239 @@ export function ServerSpaceItem({
 		if (isEditingDirectory) {
 			cancelDirectoryEdit();
 		}
-		setRenameValue(label);
+		setRenameValue(customLabel);
 		setIsRenamingLabel(true);
 	};
 
+	const startDirectoryEdit = () => {
+		setDirectoryValue(directory ?? "");
+		setIsEditingDirectory(true);
+	};
+
+	const requestClose = () => {
+		if (runningTerminalCount > 0) {
+			setIsConfirmingClose(true);
+			return;
+		}
+		onClose();
+	};
+
+	const directoryLine = displayDirectory ? (
+		<span
+			className="truncate text-xs leading-tight text-muted-foreground"
+			title={fullDirectory}
+		>
+			{displayDirectory}
+		</span>
+	) : null;
+
 	return (
-		<ContextMenu>
-			<ContextMenuTrigger asChild>
-				<div
-					className={cn(
-						"relative flex w-full items-start pl-6 pr-2 text-left text-sm transition-colors group hover:bg-muted/50",
-						isActive && "bg-muted",
-					)}
-				>
-					{isActive && (
-						<div
-							className="absolute top-0 bottom-0 left-0 w-0.5 rounded-r bg-foreground"
+		<>
+			<ContextMenu>
+				<ContextMenuTrigger asChild>
+					<div
+						className={cn(
+							"relative flex w-full items-start pl-6 pr-2 text-left text-sm transition-colors group hover:bg-muted/50",
+							isActive && "bg-muted",
+						)}
+					>
+						{isActive && (
+							<div
+								className="absolute top-0 bottom-0 left-0 w-0.5 rounded-r bg-foreground"
+								style={color ? { backgroundColor: color } : undefined}
+							/>
+						)}
+
+						<span
+							className={cn(
+								"mt-[13px] mr-2.5 size-2 shrink-0 rounded-full",
+								!color && "border border-muted-foreground/50",
+							)}
 							style={color ? { backgroundColor: color } : undefined}
 						/>
-					)}
 
-					<SquareTerminal
-						className="mt-2.5 size-4 mr-2 shrink-0 text-muted-foreground"
-						style={color ? { color } : undefined}
-					/>
-
-					<div className="flex min-w-0 flex-1 items-start gap-1.5 py-2">
-						{isEditingDirectory ? (
-							<div className="flex min-w-0 flex-1 flex-col gap-1">
-								<Input
-									ref={inputRef}
-									variant="ghost"
-									value={directoryValue}
-									onChange={(event) => setDirectoryValue(event.target.value)}
-									onBlur={submitDirectory}
-									onKeyDown={(event) => {
-										event.stopPropagation();
-										if (event.key === "Enter") {
-											event.preventDefault();
-											submitDirectory();
-										} else if (event.key === "Escape") {
-											event.preventDefault();
-											cancelDirectoryEdit();
-										}
-									}}
-									onClick={(event) => event.stopPropagation()}
-									onMouseDown={(event) => event.stopPropagation()}
-									placeholder="dev/project"
-									className="h-7 px-1 py-0 text-[13px] -ml-1"
-								/>
-								<span className="text-[11px] text-muted-foreground leading-tight">
-									Relative paths use the server base directory
-								</span>
-							</div>
-						) : isRenamingLabel ? (
-							<div className="flex min-w-0 flex-1 flex-col gap-1">
-								<Input
-									ref={renameInputRef}
-									variant="ghost"
-									value={renameValue}
-									onChange={(event) => setRenameValue(event.target.value)}
-									onBlur={submitRename}
-									onKeyDown={(event) => {
-										event.stopPropagation();
-										if (event.key === "Enter") {
-											event.preventDefault();
-											submitRename();
-										} else if (event.key === "Escape") {
-											event.preventDefault();
-											cancelRename();
-										}
-									}}
-									onClick={(event) => event.stopPropagation()}
-									onMouseDown={(event) => event.stopPropagation()}
-									placeholder="Space name"
-									className="h-7 px-1 py-0 text-[13px] -ml-1"
-								/>
-								{directory && (
-									<span className="truncate text-xs text-muted-foreground leading-tight">
-										{shortenDirectory(directory)}
+						<div className="flex min-w-0 flex-1 items-start gap-1.5 py-2">
+							{isEditingDirectory ? (
+								<div className="flex min-w-0 flex-1 flex-col gap-1">
+									<Input
+										ref={inputRef}
+										variant="ghost"
+										value={directoryValue}
+										onChange={(event) => setDirectoryValue(event.target.value)}
+										onBlur={submitDirectory}
+										onKeyDown={(event) => {
+											event.stopPropagation();
+											if (event.key === "Enter") {
+												event.preventDefault();
+												submitDirectory();
+											} else if (event.key === "Escape") {
+												event.preventDefault();
+												cancelDirectoryEdit();
+											}
+										}}
+										onClick={(event) => event.stopPropagation()}
+										onMouseDown={(event) => event.stopPropagation()}
+										placeholder="dev/project"
+										className="h-7 px-1 py-0 text-[13px] -ml-1"
+									/>
+									<span className="text-[11px] text-muted-foreground leading-tight">
+										Relative paths use the server base directory
 									</span>
-								)}
-							</div>
-						) : (
-							<button
-								type="button"
-								onClick={onSelect}
-								onDoubleClick={(event) => {
-									event.stopPropagation();
-									startRename();
-								}}
-								className="flex min-w-0 flex-1 flex-col gap-1 text-left"
-							>
-								<span
-									className={cn(
-										"truncate text-[13px] leading-tight",
-										isActive
-											? "text-foreground font-medium"
-											: "text-foreground/80",
+								</div>
+							) : isRenamingLabel ? (
+								<div className="flex min-w-0 flex-1 flex-col gap-1">
+									<Input
+										ref={renameInputRef}
+										variant="ghost"
+										value={renameValue}
+										onChange={(event) => setRenameValue(event.target.value)}
+										onBlur={submitRename}
+										onKeyDown={(event) => {
+											event.stopPropagation();
+											if (event.key === "Enter") {
+												event.preventDefault();
+												submitRename();
+											} else if (event.key === "Escape") {
+												event.preventDefault();
+												cancelRename();
+											}
+										}}
+										onClick={(event) => event.stopPropagation()}
+										onMouseDown={(event) => event.stopPropagation()}
+										placeholder="Space name"
+										className="h-7 px-1 py-0 text-[13px] -ml-1"
+									/>
+									{directoryLine}
+								</div>
+							) : (
+								<div className="flex min-w-0 flex-1 flex-col gap-1">
+									<button
+										type="button"
+										onClick={onSelect}
+										onDoubleClick={(event) => {
+											event.stopPropagation();
+											startRename();
+										}}
+										className="flex min-w-0 items-center gap-2 text-left"
+									>
+										<span
+											className={cn(
+												"min-w-0 flex-1 truncate text-[13px] leading-tight",
+												isActive
+													? "font-medium text-foreground"
+													: "text-foreground/80",
+											)}
+										>
+											{label}
+										</span>
+										<SpaceActivityBadge {...activity} />
+									</button>
+									{activity?.remote?.title && (
+										<span
+											className="truncate text-xs leading-tight text-foreground/70"
+											title={activity.remote.title}
+										>
+											{activity.remote.title}
+										</span>
 									)}
-								>
-									{label}
-								</span>
-								{directory && (
-									<span className="truncate text-xs text-muted-foreground leading-tight">
-										{shortenDirectory(directory)}
-									</span>
-								)}
-							</button>
-						)}
-					</div>
-
-					<div className="invisible flex items-center justify-end gap-1.5 opacity-0 transition-[opacity,visibility] group-hover:visible group-hover:opacity-100">
-						<Tooltip delayDuration={300}>
-							<TooltipTrigger asChild>
-								<button
-									type="button"
-									onClick={(event) => {
-										event.stopPropagation();
-										onClose();
-									}}
-									className="flex items-center justify-center text-muted-foreground hover:text-foreground"
-								>
-									<HiMiniXMark className="size-3.5" />
-								</button>
-							</TooltipTrigger>
-							<TooltipContent side="top" sideOffset={4}>
-								Close space
-							</TooltipContent>
-						</Tooltip>
-					</div>
-				</div>
-			</ContextMenuTrigger>
-			<ContextMenuContent onCloseAutoFocus={(event) => event.preventDefault()}>
-				<ContextMenuItem onSelect={startRename}>
-					<Pencil className="mr-2 size-4" />
-					Rename
-				</ContextMenuItem>
-				<ContextMenuSeparator />
-				<ContextMenuItem
-					onSelect={() => {
-						setDirectoryValue(directory ?? "");
-						setIsEditingDirectory(true);
-					}}
-				>
-					<FolderOpen className="mr-2 size-4" />
-					{directory ? "Change Directory" : "Set Directory"}
-				</ContextMenuItem>
-				{directory && (
-					<ContextMenuItem onSelect={() => onSetDirectory(undefined)}>
-						<HiMiniXMark className="mr-2 size-4" />
-						Clear Directory
-					</ContextMenuItem>
-				)}
-				<ContextMenuSeparator />
-				<ContextMenuSub>
-					<ContextMenuSubTrigger>
-						<Palette className="mr-2 size-4" />
-						Color
-					</ContextMenuSubTrigger>
-					<ContextMenuSubContent>
-						<div className="grid grid-cols-5 gap-1 p-1.5">
-							{SPACE_COLORS.map((c) => (
-								<button
-									key={c.value}
-									type="button"
-									onClick={() => onColorChange(c.value)}
-									className={cn(
-										"size-5 rounded-full transition-transform hover:scale-110",
-										color === c.value &&
-											"ring-2 ring-foreground ring-offset-1 ring-offset-background",
+									{directoryLine ?? (
+										<button
+											type="button"
+											onClick={(event) => {
+												event.stopPropagation();
+												startDirectoryEdit();
+											}}
+											className="w-fit text-left text-xs leading-tight text-muted-foreground/70 hover:text-foreground"
+										>
+											Set directory…
+										</button>
 									)}
-									style={{ backgroundColor: c.value }}
-									title={c.name}
-								/>
-							))}
+								</div>
+							)}
 						</div>
-						{color && (
-							<>
-								<ContextMenuSeparator />
-								<ContextMenuItem onSelect={() => onColorChange(null)}>
-									<HiMiniXMark className="mr-2 size-4" />
-									Remove Color
-								</ContextMenuItem>
-							</>
-						)}
-					</ContextMenuSubContent>
-				</ContextMenuSub>
-			</ContextMenuContent>
-		</ContextMenu>
+
+						<div className="invisible ml-1 flex items-center pt-2 opacity-0 transition-[opacity,visibility] group-hover:visible group-hover:opacity-100">
+							<Tooltip delayDuration={300}>
+								<TooltipTrigger asChild>
+									<button
+										type="button"
+										onClick={(event) => {
+											event.stopPropagation();
+											requestClose();
+										}}
+										className="flex items-center justify-center text-muted-foreground hover:text-foreground"
+									>
+										<HiMiniXMark className="size-3.5" />
+									</button>
+								</TooltipTrigger>
+								<TooltipContent side="top" sideOffset={4}>
+									Close space
+								</TooltipContent>
+							</Tooltip>
+						</div>
+					</div>
+				</ContextMenuTrigger>
+				<ContextMenuContent
+					onCloseAutoFocus={(event) => event.preventDefault()}
+				>
+					<ContextMenuItem onSelect={startRename}>
+						<Pencil className="mr-2 size-4" />
+						Rename
+					</ContextMenuItem>
+					<ContextMenuSeparator />
+					<ContextMenuItem onSelect={startDirectoryEdit}>
+						<FolderOpen className="mr-2 size-4" />
+						{directory ? "Change Directory" : "Set Directory"}
+					</ContextMenuItem>
+					{directory && (
+						<ContextMenuItem onSelect={() => onSetDirectory(undefined)}>
+							<HiMiniXMark className="mr-2 size-4" />
+							Clear Directory
+						</ContextMenuItem>
+					)}
+					<ContextMenuSeparator />
+					<ContextMenuSub>
+						<ContextMenuSubTrigger>
+							<Palette className="mr-2 size-4" />
+							Color
+						</ContextMenuSubTrigger>
+						<ContextMenuSubContent>
+							<div className="grid grid-cols-5 gap-1 p-1.5">
+								{SPACE_COLORS.map((c) => (
+									<button
+										key={c.value}
+										type="button"
+										onClick={() => onColorChange(c.value)}
+										className={cn(
+											"size-5 rounded-full transition-transform hover:scale-110",
+											color === c.value &&
+												"ring-2 ring-foreground ring-offset-1 ring-offset-background",
+										)}
+										style={{ backgroundColor: c.value }}
+										title={c.name}
+									/>
+								))}
+							</div>
+							{color && (
+								<>
+									<ContextMenuSeparator />
+									<ContextMenuItem onSelect={() => onColorChange(null)}>
+										<HiMiniXMark className="mr-2 size-4" />
+										Remove Color
+									</ContextMenuItem>
+								</>
+							)}
+						</ContextMenuSubContent>
+					</ContextMenuSub>
+				</ContextMenuContent>
+			</ContextMenu>
+			<CloseSpaceDialog
+				spaceLabel={label}
+				terminalCount={runningTerminalCount}
+				open={isConfirmingClose}
+				onOpenChange={setIsConfirmingClose}
+				onConfirm={onClose}
+			/>
+		</>
 	);
 }

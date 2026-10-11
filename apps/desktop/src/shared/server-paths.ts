@@ -9,6 +9,15 @@ export function resolveServerSpaceDirectory(
 	const trimmedBase = baseDirectory?.trim().replace(/\/+$/, "");
 	if (!trimmedBase) return trimmedDirectory;
 
+	// Already under the base (e.g. stored before base directories existed):
+	// don't prefix it a second time.
+	if (
+		trimmedDirectory === trimmedBase ||
+		trimmedDirectory.startsWith(`${trimmedBase}/`)
+	) {
+		return trimmedDirectory;
+	}
+
 	const relativeDirectory = trimmedDirectory.replace(/^\/+/, "");
 	if (!relativeDirectory) return trimmedBase;
 

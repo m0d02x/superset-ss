@@ -13,4 +13,19 @@ describe("resolveServerSpaceDirectory", () => {
 			"~/work",
 		);
 	});
+
+	it("does not prefix a path that is already under the base directory", () => {
+		expect(
+			resolveServerSpaceDirectory("/home/ubuntu/dev/claix-dev", "/home/ubuntu"),
+		).toBe("/home/ubuntu/dev/claix-dev");
+		expect(resolveServerSpaceDirectory("/home/ubuntu", "/home/ubuntu/")).toBe(
+			"/home/ubuntu",
+		);
+	});
+
+	it("still treats a sibling sharing the base prefix as relative", () => {
+		expect(resolveServerSpaceDirectory("/home/ubuntu2", "/home/ubuntu")).toBe(
+			"/home/ubuntu/home/ubuntu2",
+		);
+	});
 });

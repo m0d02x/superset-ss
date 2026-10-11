@@ -1,21 +1,40 @@
 import type { SelectServer } from "@superset/local-db";
 import { useMatchRoute, useNavigate } from "@tanstack/react-router";
 import { AnimatePresence, motion } from "framer-motion";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { env } from "renderer/env.renderer";
 import { electronTrpc } from "renderer/lib/electron-trpc";
 import { getLocalSpaceWorkspaceId } from "renderer/lib/local-space-workspace";
 import { useServersStore } from "renderer/stores/servers-state";
+import { useTabsStore } from "renderer/stores/tabs/store";
+import { extractPaneIdsFromLayout } from "renderer/stores/tabs/utils";
+import { resolveServerSpaceDirectory } from "shared/server-paths";
+import {
+	formatSpaceDirectory,
+	getDefaultHomeDirectory,
+	getSpaceDisplayLabels,
+	isCustomSpaceLabel,
+	UNTITLED_SPACE_LABEL,
+} from "shared/space-display";
+import {
+	type ActivePaneStatus,
+	getHighestPriorityStatus,
+} from "shared/tabs-types";
 import { AddServerDialog } from "./AddServerDialog";
+import { useServerActivity } from "./hooks/useServerActivity";
 import { LocalServerRow, ServerGroupRow, ServerSpaceItem } from "./ServerItem";
+import type { SpaceRowActivity } from "./SpaceActivityBadge";
+import { mergeRowActivity } from "./utils/mergeRowActivity";
 
 const LOCAL_SERVER_GROUP_ID = "__local__";
 
 interface ServerGroupProps {
 	server: SelectServer;
+	/** Shown next to the label when another server has the same name. */
+	hostHint?: string;
 }
 
-function ServerGroup({ server }: ServerGroupProps) {
+function ServerGroup({ server, hostHint }: ServerGroupProps) {
 	const navigate = useNavigate();
 	const utils = electronTrpc.useUtils();
 
@@ -36,6 +55,48 @@ function ServerGroup({ server }: ServerGroupProps) {
 	);
 
 	const spaceCount = spaces.length || 1;
+	const homeDirectory =
+		server.homeDirectory ?? getDefaultHomeDirectory(server.username);
+	const spaceDisplay = useMemo(() => {
+		const labels = getSpaceDisplayLabels(
+			spaces.map((space) => ({
+				id: space.id,
+				label: space.label,
+				directory: space.directory,
+			})),
+		);
+		return new Map(
+			spaces.map((space) => {
+				const fullDirectory =
+					resolveServerSpaceDirectory(space.directory, homeDirectory) ??
+					undefined;
+				return [
+					space.id,
+					{
+						label: labels.get(space.id) ?? UNTITLED_SPACE_LABEL,
+						customLabel: isCustomSpaceLabel(space.label) ? space.label : "",
+						fullDirectory,
+						displayDirectory: fullDirectory
+							? formatSpaceDirectory(fullDirectory, homeDirectory)
+							: undefined,
+					},
+				];
+			}),
+		);
+	}, [spaces, homeDirectory]);
+
+	const activity = useServerActivity(
+		server.id,
+		server.status === "connected",
+		selectedSpaceId,
+	);
+	const rowActivity = (spaceId: string): SpaceRowActivity => {
+		const space = activity.get(spaceId);
+		return {
+			remote: space?.summary,
+			status: space?.isDone ? "review" : null,
+		};
+	};
 
 	const connectMutation = electronTrpc.servers.connect.useMutation({
 		onSuccess: () => {
@@ -90,7 +151,8 @@ function ServerGroup({ server }: ServerGroupProps) {
 
 	const handleAddSpace = () => {
 		createSpaceMutation.mutate(
-			{ serverId: server.id, label: `Space ${spaces.length + 1}` },
+			// Unnamed: the row shows the folder name once a directory is set.
+			{ serverId: server.id, label: UNTITLED_SPACE_LABEL },
 			{
 				onSuccess: (space) => {
 					setSelectedServer(server.id);
@@ -176,6 +238,10 @@ function ServerGroup({ server }: ServerGroupProps) {
 				server={server}
 				isCollapsed={isCollapsed}
 				spaceCount={spaceCount}
+				collapsedActivity={mergeRowActivity(
+					spaces.map((space) => rowActivity(space.id)),
+				)}
+				hostHint={hostHint}
 				onToggleCollapse={handleToggleCollapse}
 				onAddSpace={handleAddSpace}
 				onConnect={handleConnect}
@@ -201,26 +267,35 @@ function ServerGroup({ server }: ServerGroupProps) {
 						className="overflow-hidden"
 					>
 						<div className="pb-0.5">
-							{spaces.map((space) => (
-								<ServerSpaceItem
-									key={space.id}
-									serverId={server.id}
-									spaceId={space.id}
-									label={space.label}
-									directory={space.directory ?? undefined}
-									color={space.color ?? undefined}
-									isActive={selectedSpaceId === space.id}
-									onSelect={() => handleSpaceSelect(space.id)}
-									onClose={() => handleSpaceClose(space.id)}
-									onSetDirectory={(directory) =>
-										handleSpaceDirectoryChange(space.id, directory)
-									}
-									onRename={(label) => handleSpaceRename(space.id, label)}
-									onColorChange={(color) =>
-										handleSpaceColorChange(space.id, color)
-									}
-								/>
-							))}
+							{spaces.map((space) => {
+								const display = spaceDisplay.get(space.id);
+								const spaceActivity = rowActivity(space.id);
+								return (
+									<ServerSpaceItem
+										key={space.id}
+										label={display?.label ?? space.label}
+										customLabel={display?.customLabel ?? ""}
+										directory={space.directory ?? undefined}
+										displayDirectory={display?.displayDirectory}
+										fullDirectory={display?.fullDirectory}
+										color={space.color ?? undefined}
+										isActive={selectedSpaceId === space.id}
+										activity={spaceActivity}
+										runningTerminalCount={
+											spaceActivity.remote?.terminalCount ?? 0
+										}
+										onSelect={() => handleSpaceSelect(space.id)}
+										onClose={() => handleSpaceClose(space.id)}
+										onSetDirectory={(directory) =>
+											handleSpaceDirectoryChange(space.id, directory)
+										}
+										onRename={(label) => handleSpaceRename(space.id, label)}
+										onColorChange={(color) =>
+											handleSpaceColorChange(space.id, color)
+										}
+									/>
+								);
+							})}
 						</div>
 					</motion.div>
 				)}
@@ -268,6 +343,51 @@ function LocalGroup() {
 				? currentLocalSpaceMatch.workspaceId.slice("local-space-".length)
 				: null
 			: null;
+	const { data: localHomeDirectory } = electronTrpc.window.getHomeDir.useQuery(
+		undefined,
+		{ staleTime: Number.POSITIVE_INFINITY },
+	);
+	const spaceDisplay = useMemo(() => {
+		const labels = getSpaceDisplayLabels(localSpaces);
+		return new Map(
+			localSpaces.map((space) => [
+				space.id,
+				{
+					label: labels.get(space.id) ?? UNTITLED_SPACE_LABEL,
+					customLabel: isCustomSpaceLabel(space.label) ? space.label : "",
+					displayDirectory: space.directory
+						? formatSpaceDirectory(space.directory, localHomeDirectory)
+						: undefined,
+				},
+			]),
+		);
+	}, [localSpaces, localHomeDirectory]);
+	// Agent hook status per local space, aggregated over its panes. The selector
+	// returns a string (stable by value) — returning a fresh object would
+	// re-render on every store change.
+	const localStatusKey = useTabsStore((state) =>
+		localSpaces
+			.map((space) => {
+				const workspaceId = getLocalSpaceWorkspaceId(space.id);
+				const statuses: Array<ActivePaneStatus | "idle" | undefined> = [];
+				for (const tab of state.tabs) {
+					if (tab.workspaceId !== workspaceId) continue;
+					for (const paneId of extractPaneIdsFromLayout(tab.layout)) {
+						statuses.push(state.panes[paneId]?.status);
+					}
+				}
+				return `${space.id}=${getHighestPriorityStatus(statuses) ?? ""}`;
+			})
+			.join(","),
+	);
+	const localStatuses = useMemo(() => {
+		const result: Record<string, ActivePaneStatus | null> = {};
+		for (const entry of localStatusKey.split(",")) {
+			const [spaceId, status] = entry.split("=");
+			if (spaceId) result[spaceId] = (status as ActivePaneStatus) || null;
+		}
+		return result;
+	}, [localStatusKey]);
 	const isCollapsed = isServerCollapsed(LOCAL_SERVER_GROUP_ID);
 
 	const updateSpaces = (
@@ -292,7 +412,7 @@ function LocalGroup() {
 		const now = Date.now();
 		const nextSpace = {
 			id: crypto.randomUUID(),
-			label: `Space ${localSpaces.length + 1}`,
+			label: UNTITLED_SPACE_LABEL,
 			sortOrder: localSpaces.length,
 			createdAt: now,
 			updatedAt: now,
@@ -392,6 +512,9 @@ function LocalGroup() {
 				isCollapsed={isCollapsed}
 				spaceCount={localSpaces.length || 1}
 				isActive={currentLocalSpaceMatch !== false}
+				collapsedActivity={mergeRowActivity(
+					localSpaces.map((space) => ({ status: localStatuses[space.id] })),
+				)}
 				onToggleCollapse={handleToggleCollapse}
 				onAddSpace={handleAddSpace}
 			/>
@@ -406,26 +529,33 @@ function LocalGroup() {
 						className="overflow-hidden"
 					>
 						<div className="pb-0.5">
-							{localSpaces.map((space) => (
-								<ServerSpaceItem
-									key={space.id}
-									serverId={LOCAL_SERVER_GROUP_ID}
-									spaceId={space.id}
-									label={space.label}
-									directory={space.directory}
-									color={space.color}
-									isActive={activeLocalSpaceId === space.id}
-									onSelect={() => handleSpaceSelect(space.id)}
-									onClose={() => handleSpaceClose(space.id)}
-									onSetDirectory={(directory) =>
-										handleSpaceDirectoryChange(space.id, directory)
-									}
-									onRename={(label) => handleSpaceRename(space.id, label)}
-									onColorChange={(color) =>
-										handleSpaceColorChange(space.id, color)
-									}
-								/>
-							))}
+							{localSpaces.map((space) => {
+								const display = spaceDisplay.get(space.id);
+								return (
+									<ServerSpaceItem
+										key={space.id}
+										label={display?.label ?? space.label}
+										customLabel={display?.customLabel ?? ""}
+										directory={space.directory}
+										displayDirectory={display?.displayDirectory}
+										fullDirectory={space.directory}
+										color={space.color}
+										isActive={activeLocalSpaceId === space.id}
+										activity={{ status: localStatuses[space.id] }}
+										// Local terminals survive closing the space's tab state.
+										runningTerminalCount={0}
+										onSelect={() => handleSpaceSelect(space.id)}
+										onClose={() => handleSpaceClose(space.id)}
+										onSetDirectory={(directory) =>
+											handleSpaceDirectoryChange(space.id, directory)
+										}
+										onRename={(label) => handleSpaceRename(space.id, label)}
+										onColorChange={(color) =>
+											handleSpaceColorChange(space.id, color)
+										}
+									/>
+								);
+							})}
 						</div>
 					</motion.div>
 				)}
@@ -464,9 +594,7 @@ function LiveDashboardSidebarServerSection() {
 			<div className="py-0">
 				<LocalGroup />
 
-				{servers.map((server) => (
-					<ServerGroup key={server.id} server={server} />
-				))}
+				<ServerGroups servers={servers} />
 			</div>
 
 			{servers.length === 0 && (
@@ -514,9 +642,7 @@ function SkipModeDashboardSidebarServerSection() {
 			<div className="py-0">
 				<LocalGroup />
 
-				{servers.map((server) => (
-					<ServerGroup key={server.id} server={server} />
-				))}
+				<ServerGroups servers={servers} />
 			</div>
 
 			{servers.length === 0 && (
@@ -533,4 +659,26 @@ function SkipModeDashboardSidebarServerSection() {
 			/>
 		</div>
 	);
+}
+
+/**
+ * Server groups, with `user@host` shown for servers that share a label so two
+ * "OVH Dev" entries are distinguishable.
+ */
+function ServerGroups({ servers }: { servers: SelectServer[] }) {
+	const labelCounts = new Map<string, number>();
+	for (const server of servers) {
+		labelCounts.set(server.label, (labelCounts.get(server.label) ?? 0) + 1);
+	}
+	return servers.map((server) => (
+		<ServerGroup
+			key={server.id}
+			server={server}
+			hostHint={
+				(labelCounts.get(server.label) ?? 0) > 1
+					? `${server.username}@${server.host}`
+					: undefined
+			}
+		/>
+	));
 }
