@@ -84,3 +84,11 @@ superset-dev-data/
 !.codex/config.toml
 !.codex/commands
 !.codex/prompts
+
+# Local agent tooling state (code index, session notes)
+.codegraph/
+.omo/
+.sisyphus/
+
+# Stray root-level bundle output
+/index.js
