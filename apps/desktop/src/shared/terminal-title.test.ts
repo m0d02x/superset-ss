@@ -46,6 +46,21 @@ describe("normalizeTerminalTitle", () => {
 		});
 	});
 
+	it("strips omp's title-card Nerd Font icon (shows as tofu block in our UI)", () => {
+		expect(normalizeTerminalTitle("󰛖 DIRTY: Check dirty files")).toEqual({
+			kind: "agent",
+			label: "DIRTY: Check dirty files",
+		});
+		// Icon may combine with the π marker/state glyph.
+		expect(normalizeTerminalTitle("π ⠋ 󰛖 GLYPH: Investigate block").label).toBe(
+			"GLYPH: Investigate block",
+		);
+		// Real text containing a private-use char mid-string is kept.
+		expect(normalizeTerminalTitle("π Fix 󰛖 glyph bug").label).toBe(
+			"Fix 󰛖 glyph bug",
+		);
+	});
+
 	it("treats a bare marker or spinner as empty", () => {
 		expect(normalizeTerminalTitle("π").kind).toBe("empty");
 		expect(normalizeTerminalTitle("π ⠋").kind).toBe("empty");

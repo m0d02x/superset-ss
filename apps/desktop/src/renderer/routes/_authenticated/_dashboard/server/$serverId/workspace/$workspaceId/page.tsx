@@ -8,6 +8,7 @@ import {
 	buildRemoteSessionKey,
 	useRemoteSessionsStore,
 } from "renderer/stores/remote-sessions";
+import { normalizeTerminalTitle } from "shared/terminal-title";
 import { HYPERSET_TMUX } from "shared/tmux";
 import { RemoteTerminalTab } from "../../components/RemoteTerminalTab";
 import { RemoteFileViewer } from "./components/RemoteFileViewer";
@@ -85,7 +86,9 @@ function ServerWorkspacePage() {
 
 			const restoredTabs: Tab[] = parsed.map(({ id, paneTitle }) => {
 				const num = id.replace("term-", "");
-				const label = paneTitle || `Terminal ${num}`;
+				const label = paneTitle
+					? normalizeTerminalTitle(paneTitle).label
+					: `Terminal ${num}`;
 				return { type: "terminal", id, label };
 			});
 

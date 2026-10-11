@@ -215,7 +215,7 @@ function ServerPage() {
 					persisted: [],
 					discovered: toRestore.map(({ id, paneTitle }) => ({
 						terminalId: id,
-						label: paneTitle || null,
+						label: paneTitle ? normalizeTerminalTitle(paneTitle).label : null,
 					})),
 				});
 				restoreTerminalsForSpace(
