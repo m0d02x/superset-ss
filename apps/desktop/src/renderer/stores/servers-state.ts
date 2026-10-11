@@ -44,6 +44,8 @@ export interface ServersState {
 	restoreTerminalsForSpace: (
 		spaceId: string,
 		terminalIds: string[],
+		labels?: Record<string, string>,
+		selectedTerminalId?: string | null,
 	) => void;
 }
 
@@ -159,7 +161,12 @@ export const useServersStore = create<ServersState>()(
 					};
 				}),
 
-			restoreTerminalsForSpace: (spaceId, terminalIds) => {
+			restoreTerminalsForSpace: (
+				spaceId,
+				terminalIds,
+				labels = {},
+				selectedTerminalId,
+			) => {
 				if (terminalIds.length === 0) return;
 
 				// Update the module-level counter past the highest restored id
@@ -174,8 +181,8 @@ export const useServersStore = create<ServersState>()(
 				}
 
 				const terminals: ServerTerminal[] = terminalIds.map((id) => {
-					const num = id.replace("term-", "");
-					return { id, label: `Terminal ${num}` };
+					const label = labels[id] ?? `Terminal ${id.replace("term-", "")}`;
+					return { id, label };
 				});
 
 				set((state) => ({
@@ -185,7 +192,7 @@ export const useServersStore = create<ServersState>()(
 					},
 					selectedTerminalBySpace: {
 						...state.selectedTerminalBySpace,
-						[spaceId]: terminals[0].id,
+						[spaceId]: selectedTerminalId ?? terminals[0].id,
 					},
 				}));
 			},

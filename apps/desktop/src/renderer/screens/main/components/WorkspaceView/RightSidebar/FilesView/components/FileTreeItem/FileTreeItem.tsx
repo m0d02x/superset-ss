@@ -24,6 +24,7 @@ import {
 import type { DirectoryEntry } from "shared/file-tree-types";
 import { useFileDrag, usePathActions } from "../../../ChangesView/hooks";
 import { FileIcon } from "../../utils";
+import { activateTreeEntry } from "../../utils/folder-activation";
 
 interface FileTreeItemProps {
 	item: ItemInstance<DirectoryEntry>;
@@ -102,7 +103,12 @@ export function FileTreeItem({
 
 	const handleDoubleClick = (e: React.MouseEvent) => {
 		e.stopPropagation();
-		onOpenInEditor(entry);
+		activateTreeEntry({
+			isDirectory: isFolder,
+			isExpanded,
+			item,
+			onOpenInEditor: () => onOpenInEditor(entry),
+		});
 	};
 
 	const handleKeyDown = (e: React.KeyboardEvent) => {

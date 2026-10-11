@@ -21,6 +21,7 @@ import {
 	type ServerTerminal,
 	useServersStore,
 } from "renderer/stores/servers-state";
+import { buildRestoredServerTerminals } from "shared/server-terminal-sessions";
 import { HYPERSET_SESSION_PREFIX, HYPERSET_TMUX } from "shared/tmux";
 import { GhosttySSHTerminal } from "./components/GhosttySSHTerminal";
 import { SSHTerminal } from "./components/SSHTerminal";
@@ -86,6 +87,21 @@ function ServerPage() {
 		{ serverId },
 		{ refetchOnWindowFocus: false },
 	);
+	const { data: persistedTerminalSessions = [] } =
+		electronTrpc.servers.listTerminalSessions.useQuery(
+			{ spaceId: spaceId ?? "" },
+			{ enabled: !!spaceId, refetchOnWindowFocus: false },
+		);
+	// `useMutation()` returns a fresh object on every render (its result spread is
+	// rebuilt each time), while `.mutate` is stable. Effects/callbacks must depend
+	// on `.mutate` only — depending on the mutation object makes any mutation state
+	// change re-fire the effect, which mutates again → infinite update loop.
+	const upsertTerminalSession =
+		electronTrpc.servers.upsertTerminalSession.useMutation().mutate;
+	const deleteTerminalSession =
+		electronTrpc.servers.deleteTerminalSession.useMutation().mutate;
+	const setSelectedTerminalSession =
+		electronTrpc.servers.setSelectedTerminalSession.useMutation().mutate;
 	const destroySession = useRemoteSessionsStore(
 		(state) => state.destroySession,
 	);
@@ -114,6 +130,27 @@ function ServerPage() {
 		if (!spaceId || server?.status !== "connected") return;
 		if (restoredSpacesRef.current.has(spaceId)) return;
 		restoredSpacesRef.current.add(spaceId);
+
+		if (persistedTerminalSessions.length > 0) {
+			const restored = buildRestoredServerTerminals({
+				spaceId,
+				persisted: persistedTerminalSessions,
+				discovered: [],
+			});
+			tmuxOverridesRef.current = new Map(restored.tmuxOverrides);
+			restoreTerminalsForSpace(
+				spaceId,
+				restored.terminals.map((terminal) => terminal.id),
+				Object.fromEntries(
+					restored.terminals.map((terminal) => [terminal.id, terminal.label]),
+				),
+				restored.selectedTerminalId,
+			);
+			for (const terminal of restored.terminals) {
+				explicitTitlesRef.current.add(terminal.id);
+			}
+			return;
+		}
 
 		const prefix = `ss-${spaceId}-term-`;
 		execServerCommand({
@@ -160,8 +197,22 @@ function ServerPage() {
 					});
 				}
 
-				const ids = toRestore.map(({ id }) => id);
-				restoreTerminalsForSpace(spaceId, ids);
+				const restored = buildRestoredServerTerminals({
+					spaceId,
+					persisted: [],
+					discovered: toRestore.map(({ id, paneTitle }) => ({
+						terminalId: id,
+						label: paneTitle || null,
+					})),
+				});
+				restoreTerminalsForSpace(
+					spaceId,
+					restored.terminals.map((terminal) => terminal.id),
+					Object.fromEntries(
+						restored.terminals.map((terminal) => [terminal.id, terminal.label]),
+					),
+					restored.selectedTerminalId,
+				);
 
 				// Apply tmux pane titles to restored tabs
 				for (const { id, paneTitle } of toRestore) {
@@ -177,6 +228,7 @@ function ServerPage() {
 			});
 	}, [
 		execServerCommand,
+		persistedTerminalSessions,
 		restoreTerminalsForSpace,
 		server,
 		serverId,
@@ -226,13 +278,39 @@ function ServerPage() {
 		return tabs[0]?.id || null;
 	}, [getSelectedTerminalForSpace, spaceId, tabParam, tabs]);
 
+	const persistTerminalLabel = useCallback(
+		(sid: string, terminalId: string, label: string) => {
+			upsertTerminalSession({
+				serverId,
+				spaceId: sid,
+				terminalId,
+				tmuxSessionName:
+					tmuxOverridesRef.current.get(`${sid}:${terminalId}`) ??
+					`ss-${sid}-${terminalId}`,
+				label,
+				sortOrder:
+					spaceTerminals[sid]?.findIndex(
+						(terminal) => terminal.id === terminalId,
+					) ?? 0,
+				isSelected: activeTabId === terminalId,
+			});
+		},
+		[activeTabId, serverId, spaceTerminals, upsertTerminalSession],
+	);
+
 	useEffect(() => {
 		if (!spaceId) {
 			return;
 		}
 
 		setSelectedTerminalForSpace(spaceId, activeTabId);
-	}, [activeTabId, setSelectedTerminalForSpace, spaceId]);
+		setSelectedTerminalSession({ spaceId, terminalId: activeTabId });
+	}, [
+		activeTabId,
+		setSelectedTerminalForSpace,
+		setSelectedTerminalSession,
+		spaceId,
+	]);
 
 	useEffect(() => {
 		setSelectedServer(serverId);
@@ -252,6 +330,15 @@ function ServerPage() {
 		if (inheritedCwd) {
 			setTerminalCwd(terminal.id, inheritedCwd);
 		}
+		upsertTerminalSession({
+			serverId,
+			spaceId,
+			terminalId: terminal.id,
+			tmuxSessionName: `ss-${spaceId}-${terminal.id}`,
+			label: terminal.label,
+			sortOrder: tabs.length,
+			isSelected: true,
+		});
 		navigate({
 			search: { space: spaceId, tab: terminal.id },
 		});
@@ -260,9 +347,12 @@ function ServerPage() {
 		activeTabId,
 		addTerminalToSpace,
 		navigate,
+		serverId,
 		setTerminalCwd,
 		spaceId,
+		tabs.length,
 		terminalCwds,
+		upsertTerminalSession,
 	]);
 
 	// Tmux session discovery for "Attach" dropdown
@@ -318,11 +408,28 @@ function ServerPage() {
 			// Override the tmux session name for this terminal
 			// We store it so acquireSession uses the external session name
 			tmuxOverridesRef.current.set(`${spaceId}:${terminal.id}`, sessionName);
+			upsertTerminalSession({
+				serverId,
+				spaceId,
+				terminalId: terminal.id,
+				tmuxSessionName: sessionName,
+				label: sessionTitle || terminal.label,
+				sortOrder: tabs.length,
+				isSelected: true,
+			});
 			navigate({
 				search: { space: spaceId, tab: terminal.id },
 			});
 		},
-		[addTerminalToSpace, navigate, setTerminalLabel, spaceId],
+		[
+			addTerminalToSpace,
+			navigate,
+			serverId,
+			setTerminalLabel,
+			spaceId,
+			tabs.length,
+			upsertTerminalSession,
+		],
 	);
 
 	const tmuxOverridesRef = useRef<Map<string, string>>(new Map());
@@ -368,6 +475,8 @@ function ServerPage() {
 			);
 
 			const wasActive = activeTabId === terminalId;
+			tmuxOverridesRef.current.delete(`${spaceId}:${terminalId}`);
+			deleteTerminalSession({ spaceId, terminalId });
 			removeTerminalFromSpace(spaceId, terminalId);
 
 			if (wasActive) {
@@ -383,6 +492,7 @@ function ServerPage() {
 		},
 		[
 			activeTabId,
+			deleteTerminalSession,
 			destroySession,
 			navigate,
 			removeTerminalFromSpace,
@@ -712,6 +822,7 @@ function ServerPage() {
 												const dirName = cwd.split("/").filter(Boolean).pop();
 												if (dirName) {
 													setTerminalLabel(sid, tab.id, dirName);
+													persistTerminalLabel(sid, tab.id, dirName);
 												}
 											}
 										}}
@@ -719,6 +830,7 @@ function ServerPage() {
 											if (title) {
 												setTerminalLabel(sid, tab.id, title);
 												explicitTitlesRef.current.add(tab.id);
+												persistTerminalLabel(sid, tab.id, title);
 											}
 										}}
 									/>

@@ -64,7 +64,10 @@ export function SecretsSettings({ projectId }: SecretsSettingsProps) {
 				neonProjectId: suggestedMatch.id,
 			});
 		}
-	}, [suggestedMatch, linkToNeon.mutate, projectId, linkToNeon]);
+		// Depend on the stable `.mutate` only — the mutation object identity changes
+		// on every state transition (isPending → success), which would re-fire this
+		// effect and mutate again in a loop.
+	}, [suggestedMatch, linkToNeon.mutate, projectId]);
 
 	const linkedCloudProject = useMemo(() => {
 		if (!project?.neonProjectId || !cloudProjects) return null;
@@ -104,7 +107,7 @@ export function SecretsSettings({ projectId }: SecretsSettingsProps) {
 		} finally {
 			setIsCreatingCloud(false);
 		}
-	}, [project, organizationId, linkToNeon, projectId]);
+	}, [project, organizationId, linkToNeon.mutate, projectId]);
 
 	const handleSaved = () => {
 		setRefreshKey((k) => k + 1);

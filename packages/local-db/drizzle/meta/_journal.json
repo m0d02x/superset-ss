@@ -302,6 +302,13 @@
       "when": 1783132800000,
       "tag": "0042_add_server_home_directory",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "6",
+      "when": 1783132801000,
+      "tag": "0043_add_server_terminal_sessions",
+      "breakpoints": true
     }
   ]
 }

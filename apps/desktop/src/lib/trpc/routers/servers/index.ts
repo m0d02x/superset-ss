@@ -7,12 +7,13 @@ import {
 	type SelectServer,
 	serverSpaces,
 	servers,
+	serverTerminalSessions,
 	workspaces,
 	worktrees,
 } from "@superset/local-db";
 import { SERVER_AUTH_METHODS } from "@superset/local-db/schema/zod";
 import { observable } from "@trpc/server/observable";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { dialog } from "electron";
 import { localDb } from "main/lib/local-db";
 import { getSSHConnectionManager } from "main/lib/ssh-connection-manager";
@@ -1055,6 +1056,118 @@ export const createServersRouter = () => {
 			.input(z.object({ id: z.string() }))
 			.mutation(({ input }) => {
 				localDb.delete(serverSpaces).where(eq(serverSpaces.id, input.id)).run();
+				return { success: true };
+			}),
+
+		listTerminalSessions: publicProcedure
+			.input(z.object({ spaceId: z.string() }))
+			.query(({ input }) => {
+				return localDb
+					.select()
+					.from(serverTerminalSessions)
+					.where(eq(serverTerminalSessions.spaceId, input.spaceId))
+					.orderBy(serverTerminalSessions.sortOrder)
+					.all();
+			}),
+
+		upsertTerminalSession: publicProcedure
+			.input(
+				z.object({
+					serverId: z.string(),
+					spaceId: z.string(),
+					terminalId: z.string(),
+					tmuxSessionName: z.string().min(1),
+					label: z.string().nullable().optional(),
+					sortOrder: z.number().int().optional(),
+					isSelected: z.boolean().optional(),
+				}),
+			)
+			.mutation(({ input }) => {
+				const existing = localDb
+					.select({ id: serverTerminalSessions.id })
+					.from(serverTerminalSessions)
+					.where(
+						and(
+							eq(serverTerminalSessions.spaceId, input.spaceId),
+							eq(serverTerminalSessions.terminalId, input.terminalId),
+						),
+					)
+					.get();
+
+				if (input.isSelected) {
+					localDb
+						.update(serverTerminalSessions)
+						.set({ isSelected: false, updatedAt: Date.now() })
+						.where(eq(serverTerminalSessions.spaceId, input.spaceId))
+						.run();
+				}
+
+				const values = {
+					serverId: input.serverId,
+					spaceId: input.spaceId,
+					terminalId: input.terminalId,
+					tmuxSessionName: input.tmuxSessionName,
+					label: input.label ?? null,
+					sortOrder: input.sortOrder ?? 0,
+					isSelected: input.isSelected ?? false,
+					updatedAt: Date.now(),
+				};
+
+				if (existing) {
+					return localDb
+						.update(serverTerminalSessions)
+						.set(values)
+						.where(eq(serverTerminalSessions.id, existing.id))
+						.returning()
+						.get();
+				}
+
+				return localDb
+					.insert(serverTerminalSessions)
+					.values(values)
+					.returning()
+					.get();
+			}),
+
+		deleteTerminalSession: publicProcedure
+			.input(z.object({ spaceId: z.string(), terminalId: z.string() }))
+			.mutation(({ input }) => {
+				localDb
+					.delete(serverTerminalSessions)
+					.where(
+						and(
+							eq(serverTerminalSessions.spaceId, input.spaceId),
+							eq(serverTerminalSessions.terminalId, input.terminalId),
+						),
+					)
+					.run();
+				return { success: true };
+			}),
+
+		setSelectedTerminalSession: publicProcedure
+			.input(
+				z.object({ spaceId: z.string(), terminalId: z.string().nullable() }),
+			)
+			.mutation(({ input }) => {
+				localDb
+					.update(serverTerminalSessions)
+					.set({ isSelected: false, updatedAt: Date.now() })
+					.where(eq(serverTerminalSessions.spaceId, input.spaceId))
+					.run();
+
+				if (input.terminalId) {
+					localDb
+						.update(serverTerminalSessions)
+						.set({ isSelected: true, updatedAt: Date.now() })
+						.where(
+							and(
+								eq(serverTerminalSessions.spaceId, input.spaceId),
+								eq(serverTerminalSessions.terminalId, input.terminalId),
+							),
+						)
+						.run();
+				}
+
 				return { success: true };
 			}),
 	});

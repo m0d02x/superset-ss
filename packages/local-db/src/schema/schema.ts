@@ -462,3 +462,41 @@ export const serverSpaces = sqliteTable(
 
 export type InsertServerSpace = typeof serverSpaces.$inferInsert;
 export type SelectServerSpace = typeof serverSpaces.$inferSelect;
+
+export const serverTerminalSessions = sqliteTable(
+	"server_terminal_sessions",
+	{
+		id: text("id")
+			.primaryKey()
+			.$defaultFn(() => uuidv4()),
+		serverId: text("server_id")
+			.notNull()
+			.references(() => servers.id, { onDelete: "cascade" }),
+		spaceId: text("space_id")
+			.notNull()
+			.references(() => serverSpaces.id, { onDelete: "cascade" }),
+		terminalId: text("terminal_id").notNull(),
+		tmuxSessionName: text("tmux_session_name").notNull(),
+		label: text("label"),
+		sortOrder: integer("sort_order").notNull().default(0),
+		isSelected: integer("is_selected", { mode: "boolean" }).default(false),
+		createdAt: integer("created_at")
+			.notNull()
+			.$defaultFn(() => Date.now()),
+		updatedAt: integer("updated_at")
+			.notNull()
+			.$defaultFn(() => Date.now()),
+	},
+	(table) => [
+		index("server_terminal_sessions_space_id_idx").on(table.spaceId),
+		index("server_terminal_sessions_terminal_idx").on(
+			table.spaceId,
+			table.terminalId,
+		),
+	],
+);
+
+export type InsertServerTerminalSession =
+	typeof serverTerminalSessions.$inferInsert;
+export type SelectServerTerminalSession =
+	typeof serverTerminalSessions.$inferSelect;
