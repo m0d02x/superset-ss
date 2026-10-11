@@ -22,6 +22,7 @@ import {
 } from "shared/tabs-types";
 import { AddServerDialog } from "./AddServerDialog";
 import { useServerActivity } from "./hooks/useServerActivity";
+import { NewServerSpaceDialog } from "./NewServerSpaceDialog";
 import { LocalServerRow, ServerGroupRow, ServerSpaceItem } from "./ServerItem";
 import type { SpaceRowActivity } from "./SpaceActivityBadge";
 import { mergeRowActivity } from "./utils/mergeRowActivity";
@@ -122,12 +123,6 @@ function ServerGroup({ server, hostHint }: ServerGroupProps) {
 		},
 	});
 
-	const createSpaceMutation = electronTrpc.servers.createSpace.useMutation({
-		onSuccess: () => {
-			utils.servers.listSpaces.invalidate({ serverId: server.id });
-		},
-	});
-
 	const deleteSpaceMutation = electronTrpc.servers.deleteSpace.useMutation({
 		onSuccess: () => {
 			utils.servers.listSpaces.invalidate({ serverId: server.id });
@@ -150,23 +145,25 @@ function ServerGroup({ server, hostHint }: ServerGroupProps) {
 	};
 
 	const handleAddSpace = () => {
-		createSpaceMutation.mutate(
-			// Unnamed: the row shows the folder name once a directory is set.
-			{ serverId: server.id, label: UNTITLED_SPACE_LABEL },
-			{
-				onSuccess: (space) => {
-					setSelectedServer(server.id);
-					setSelectedSpace(space.id);
-					autoConnect();
+		// Opens the folder picker; nothing is created until the user submits.
+		const initialDirectory =
+			spaces.find((space) => space.id === selectedSpaceId)?.directory ?? "";
+		setIsNewSpaceDialogOpen(true);
+		setInitialDirectory(initialDirectory);
+	};
 
-					navigate({
-						to: "/server/$serverId",
-						params: { serverId: server.id },
-						search: { space: space.id },
-					});
-				},
-			},
-		);
+	const [isNewSpaceDialogOpen, setIsNewSpaceDialogOpen] = useState(false);
+	const [initialDirectory, setInitialDirectory] = useState("");
+
+	const handleNewSpaceCreated = (space: { id: string }) => {
+		setSelectedServer(server.id);
+		setSelectedSpace(space.id);
+		autoConnect();
+		navigate({
+			to: "/server/$serverId",
+			params: { serverId: server.id },
+			search: { space: space.id },
+		});
 	};
 
 	const handleSpaceSelect = (spaceId: string) => {
@@ -255,6 +252,16 @@ function ServerGroup({ server, hostHint }: ServerGroupProps) {
 				open={isEditDialogOpen}
 				onOpenChange={setIsEditDialogOpen}
 				server={server}
+			/>
+
+			<NewServerSpaceDialog
+				server={server}
+				spaces={spaces}
+				open={isNewSpaceDialogOpen}
+				onOpenChange={setIsNewSpaceDialogOpen}
+				initialDirectory={initialDirectory}
+				onCreated={handleNewSpaceCreated}
+				onOpenExisting={handleSpaceSelect}
 			/>
 
 			<AnimatePresence initial={false}>

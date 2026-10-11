@@ -22,6 +22,10 @@ import {
 	buildServerActivityCommand,
 	parseServerActivity,
 } from "shared/server-activity";
+import {
+	buildListDirectoriesCommand,
+	parseListDirectoriesOutput,
+} from "shared/server-directories";
 import { resolveServerSpaceDirectory } from "shared/server-paths";
 import { HYPERSET_TMUX } from "shared/tmux";
 import { z } from "zod";
@@ -761,6 +765,23 @@ export const createServersRouter = () => {
 					}));
 			}),
 
+		/**
+		 * Folders inside `path` on the remote server, for the new-space picker.
+		 * Expands `~`, follows symlinks, and returns the resolved absolute path.
+		 * Failures (missing folder, no permission) come back as `error` instead
+		 * of an empty list so the picker can say why.
+		 */
+		listDirectories: publicProcedure
+			.input(z.object({ id: z.string(), path: z.string() }))
+			.query(async ({ input }) => {
+				const manager = getSSHConnectionManager();
+				const result = await manager.exec(
+					input.id,
+					buildListDirectoriesCommand(input.path),
+				);
+				return parseListDirectoriesOutput(result);
+			}),
+
 		createDirectory: publicProcedure
 			.input(z.object({ id: z.string(), path: z.string() }))
 			.mutation(async ({ input }) => {
@@ -1041,12 +1062,13 @@ export const createServersRouter = () => {
 					.all();
 			}),
 
+		/** `directory` is an absolute path picked on the server; stored as-is. */
 		createSpace: publicProcedure
 			.input(
 				z.object({
 					serverId: z.string(),
 					label: z.string().min(1),
-					directory: z.string().optional(),
+					directory: z.string().startsWith("/"),
 				}),
 			)
 			.mutation(({ input }) => {
@@ -1055,7 +1077,7 @@ export const createServersRouter = () => {
 					.values({
 						serverId: input.serverId,
 						label: input.label,
-						directory: resolveSpaceDirectory(input.directory, input.serverId),
+						directory: input.directory,
 					})
 					.returning()
 					.get();
