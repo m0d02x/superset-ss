@@ -1,6 +1,6 @@
 import { Button } from "@superset/ui/button";
 import { createFileRoute } from "@tanstack/react-router";
-import { Plus, X } from "lucide-react";
+import { Plus } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { LuPanelRight } from "react-icons/lu";
 import { electronTrpc } from "renderer/lib/electron-trpc";
@@ -9,6 +9,7 @@ import {
 	useRemoteSessionsStore,
 } from "renderer/stores/remote-sessions";
 import { HYPERSET_TMUX } from "shared/tmux";
+import { RemoteTerminalTab } from "../../components/RemoteTerminalTab";
 import { RemoteFileViewer } from "./components/RemoteFileViewer";
 import { ServerWorkspaceSidebar } from "./components/ServerWorkspaceSidebar";
 import { SSHTerminal } from "./components/SSHTerminal";
@@ -225,37 +226,22 @@ function ServerWorkspacePage() {
 				<div className="flex shrink-0 items-center border-b border-border bg-muted/30 h-10">
 					<div className="flex-1 flex items-center overflow-x-auto hide-scrollbar">
 						{tabs.map((tab) => (
-							<div
+							<RemoteTerminalTab
 								key={tab.id}
-								role="tab"
-								aria-selected={activeTabId === tab.id}
-								tabIndex={0}
-								className={`group flex items-center gap-1.5 px-3 py-1.5 text-xs border-r border-border shrink-0 transition-colors ${
-									activeTabId === tab.id
-										? "bg-background text-foreground"
-										: "text-muted-foreground hover:text-foreground hover:bg-background/50"
-								}`}
-								onClick={() => activateTab(tab.id)}
-								onKeyDown={(event) => {
-									if (event.key === "Enter" || event.key === " ") {
-										event.preventDefault();
-										activateTab(tab.id);
-									}
-								}}
-							>
-								<span className="truncate max-w-32">{tab.label}</span>
-								<button
-									type="button"
-									className="opacity-0 group-hover:opacity-100 hover:bg-muted rounded p-0.5 transition-opacity"
-									onClick={(e) => {
-										e.stopPropagation();
-										closeTab(tab.id);
-									}}
-									tabIndex={-1}
-								>
-									<X className="size-3" />
-								</button>
-							</div>
+								label={tab.label}
+								isActive={activeTabId === tab.id}
+								sessionKey={
+									tab.type === "terminal"
+										? buildRemoteSessionKey({
+												serverId,
+												workspaceId,
+												terminalId: tab.id,
+											})
+										: undefined
+								}
+								onSelect={() => activateTab(tab.id)}
+								onClose={() => closeTab(tab.id)}
+							/>
 						))}
 					</div>
 
@@ -305,6 +291,7 @@ function ServerWorkspacePage() {
 									workspaceId={workspaceId}
 									terminalId={tab.id}
 									cwd={worktreePath}
+									isActive={activeTabId === tab.id}
 									onTitleChange={(title) => updateTabLabel(tab.id, title)}
 								/>
 							</div>

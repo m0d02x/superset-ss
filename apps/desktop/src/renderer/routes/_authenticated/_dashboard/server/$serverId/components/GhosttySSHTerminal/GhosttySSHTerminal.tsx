@@ -1,4 +1,3 @@
-import { Button } from "@superset/ui/button";
 import type { FitAddon, Terminal } from "ghostty-web";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { electronTrpc } from "renderer/lib/electron-trpc";
@@ -7,6 +6,7 @@ import {
 	useRemoteSessionsStore,
 } from "renderer/stores/remote-sessions";
 import { clearRemoteTerminalSnapshot } from "renderer/stores/remote-sessions/view-state";
+import { RemoteShellOverlay } from "../RemoteShellOverlay";
 
 interface GhosttySSHTerminalProps {
 	serverId: string;
@@ -102,9 +102,6 @@ export function GhosttySSHTerminal({
 	const acquireSession = useRemoteSessionsStore(
 		(state) => state.acquireSession,
 	);
-	const reconnectSession = useRemoteSessionsStore(
-		(state) => state.reconnectSession,
-	);
 	const releaseSession = useRemoteSessionsStore(
 		(state) => state.releaseSession,
 	);
@@ -112,7 +109,6 @@ export function GhosttySSHTerminal({
 		(state) => state.markSessionClosed,
 	);
 	const sessionId = sessionEntry?.sessionId ?? null;
-	const status = sessionEntry?.status ?? "idle";
 
 	const writeShell = electronTrpc.servers.writeShell.useMutation();
 	const resizeShell = electronTrpc.servers.resizeShell.useMutation();
@@ -181,9 +177,7 @@ export function GhosttySSHTerminal({
 						// Buffer data while hidden to avoid WASM calls on inactive surface
 						pendingWritesRef.current.push(msg.data);
 					} else {
-						safeTerminalCall(terminalRef.current, (t) =>
-							t.write(msg.data),
-						);
+						safeTerminalCall(terminalRef.current, (t) => t.write(msg.data));
 					}
 					cwdBufferRef.current = `${cwdBufferRef.current}${msg.data}`.slice(
 						-4096,
@@ -395,10 +389,7 @@ export function GhosttySSHTerminal({
 				fitAddon.fit();
 				t.focus();
 
-				if (
-					sessionId &&
-					(t.cols !== prevCols || t.rows !== prevRows)
-				) {
+				if (sessionId && (t.cols !== prevCols || t.rows !== prevRows)) {
 					resizeShellRef.current({
 						sessionId,
 						cols: t.cols,
@@ -414,54 +405,17 @@ export function GhosttySSHTerminal({
 	}, [isActive, sessionId]);
 
 	return (
-		<div className="flex h-full w-full flex-col">
-			<div className="flex items-center gap-2 border-b border-border px-3 h-10 shrink-0">
-				<span className="text-xs text-muted-foreground">
-					{!ghosttyReady
-						? "Loading Ghostty..."
-						: status === "open"
-							? "SSH Shell (Ghostty)"
-							: status === "opening" || status === "idle"
-								? "Opening shell..."
-								: "Disconnected"}
-				</span>
-				{cwd && (
-					<span className="text-xs text-muted-foreground/60 truncate max-w-80">
-						{cwd}
-					</span>
-				)}
-				<span className="text-[10px] text-emerald-500/70 font-mono">
-					ghostty-web
-				</span>
-				<Button
-					size="sm"
-					variant="ghost"
-					className="ml-auto h-6 text-xs"
-					onClick={() => {
-						cleanupRef.current?.();
-						cleanupRef.current = null;
-						clearRemoteTerminalSnapshot(cacheKey);
-						void reconnectSession({
-							key: cacheKey,
-							serverId,
-							cwd: initialCwdRef.current,
-							tmuxSession: spaceId ? `ss-${spaceId}-${terminalId}` : `ss-${terminalId}`,
-						}).catch((error) => {
-							safeTerminalCall(terminalRef.current, (t) =>
-								t.writeln(
-									`\r\n\x1b[31mFailed to reopen shell: ${error instanceof Error ? error.message : String(error)}\x1b[0m`,
-								),
-							);
-						});
-					}}
-				>
-					Reconnect
-				</Button>
-			</div>
+		<div className="relative h-full w-full">
 			<div
 				ref={containerRef}
-				className="flex-1 min-h-0 min-w-0 overflow-hidden bg-[#14100f] p-1"
+				className="h-full w-full overflow-hidden bg-[#14100f] p-1"
 			/>
+			{!ghosttyReady && (
+				<div className="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">
+					Loading terminal…
+				</div>
+			)}
+			<RemoteShellOverlay sessionKey={cacheKey} isActive={isActive} />
 		</div>
 	);
 }

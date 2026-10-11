@@ -153,6 +153,44 @@ describe("remote session store", () => {
 		expect(openShellMutate).not.toHaveBeenCalled();
 	});
 
+	it("reconnects a dropped shell into the same tmux session and cwd", async () => {
+		const key = buildRemoteSessionKey({
+			serverId: "server-a",
+			terminalId: "term-1",
+		});
+
+		const sessionId = await useRemoteSessionsStore.getState().acquireSession({
+			key,
+			serverId: "server-a",
+			cwd: "/home/u/code",
+			tmuxSession: "ss-space-term-1",
+		});
+		useRemoteSessionsStore.getState().markSessionClosed(key, sessionId);
+		expect(useRemoteSessionsStore.getState().sessions[key]?.status).toBe(
+			"error",
+		);
+
+		await useRemoteSessionsStore.getState().reconnectSessionByKey(key);
+
+		expect(openShellMutate).toHaveBeenLastCalledWith(
+			expect.objectContaining({
+				serverId: "server-a",
+				cwd: "/home/u/code",
+				tmuxSession: "ss-space-term-1",
+			}),
+		);
+		expect(useRemoteSessionsStore.getState().sessions[key]?.status).toBe(
+			"open",
+		);
+	});
+
+	it("rejects a keyed reconnect for an unknown session", async () => {
+		await expect(
+			useRemoteSessionsStore.getState().reconnectSessionByKey("server-a:nope"),
+		).rejects.toThrow("No remote session to reconnect");
+		expect(openShellMutate).not.toHaveBeenCalled();
+	});
+
 	it("preserves detached sessions until explicit destroy", async () => {
 		const key = buildRemoteSessionKey({
 			serverId: "server-a",

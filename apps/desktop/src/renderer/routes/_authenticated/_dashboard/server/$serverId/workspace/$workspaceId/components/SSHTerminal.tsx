@@ -1,4 +1,3 @@
-import { Button } from "@superset/ui/button";
 import { ClipboardAddon } from "@xterm/addon-clipboard";
 import { FitAddon } from "@xterm/addon-fit";
 import { SerializeAddon } from "@xterm/addon-serialize";
@@ -23,6 +22,7 @@ import {
 	getRemoteTerminalSnapshot,
 	saveRemoteTerminalSnapshot,
 } from "renderer/stores/remote-sessions/view-state";
+import { RemoteShellOverlay } from "../../../components/RemoteShellOverlay";
 import { setupRemoteImagePaste } from "../../../utils/setupRemoteImagePaste";
 
 interface SSHTerminalProps {
@@ -30,6 +30,7 @@ interface SSHTerminalProps {
 	workspaceId: string;
 	terminalId: string;
 	cwd?: string;
+	isActive?: boolean;
 	onTitleChange?: (title: string) => void;
 }
 
@@ -38,6 +39,7 @@ export function SSHTerminal({
 	workspaceId,
 	terminalId,
 	cwd,
+	isActive = false,
 	onTitleChange,
 }: SSHTerminalProps) {
 	const containerRef = useRef<HTMLDivElement | null>(null);
@@ -62,9 +64,6 @@ export function SSHTerminal({
 	const acquireSession = useRemoteSessionsStore(
 		(state) => state.acquireSession,
 	);
-	const reconnectSession = useRemoteSessionsStore(
-		(state) => state.reconnectSession,
-	);
 	const releaseSession = useRemoteSessionsStore(
 		(state) => state.releaseSession,
 	);
@@ -72,7 +71,6 @@ export function SSHTerminal({
 		(state) => state.markSessionClosed,
 	);
 	const sessionId = sessionEntry?.sessionId ?? null;
-	const status = sessionEntry?.status ?? "idle";
 
 	const batcherRef = useRef(new WriteBatcher());
 	const onTitleChangeRef = useRef(onTitleChange);
@@ -309,47 +307,12 @@ export function SSHTerminal({
 	}, [sessionId]);
 
 	return (
-		<div className="flex h-full w-full flex-col">
-			<div className="flex items-center gap-2 border-b border-border px-3 py-1.5">
-				<span className="text-xs text-muted-foreground">
-					{status === "open"
-						? "SSH Shell"
-						: status === "opening" || status === "idle"
-							? "Opening shell..."
-							: "Disconnected"}
-				</span>
-				{cwd && (
-					<span className="text-xs text-muted-foreground/60 truncate max-w-80">
-						{cwd}
-					</span>
-				)}
-				<Button
-					size="sm"
-					variant="ghost"
-					className="ml-auto h-6 text-xs"
-					onClick={() => {
-						cleanupRef.current?.();
-						cleanupRef.current = null;
-						clearRemoteTerminalSnapshot(cacheKey);
-						void reconnectSession({
-							key: cacheKey,
-							serverId,
-							cwd: initialCwdRef.current,
-							tmuxSession: `ss-${workspaceId}-${terminalId}`,
-						}).catch((error) => {
-							terminalRef.current?.writeln(
-								`\r\n\x1b[31mFailed to reopen shell: ${error instanceof Error ? error.message : String(error)}\x1b[0m`,
-							);
-						});
-					}}
-				>
-					Reconnect
-				</Button>
-			</div>
+		<div className="relative h-full w-full">
 			<div
 				ref={containerRef}
-				className="flex-1 min-h-0 min-w-0 overflow-hidden bg-[#14100f] p-1"
+				className="h-full w-full overflow-hidden bg-[#14100f] p-1"
 			/>
+			<RemoteShellOverlay sessionKey={cacheKey} isActive={isActive} />
 		</div>
 	);
 }

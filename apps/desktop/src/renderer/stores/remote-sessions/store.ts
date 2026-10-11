@@ -1,6 +1,7 @@
 import { electronTrpcClient } from "renderer/lib/trpc-client";
 import { create } from "zustand";
 import { devtools } from "zustand/middleware";
+import { clearRemoteTerminalSnapshot } from "./view-state";
 
 const DEFAULT_REMOTE_TERMINAL_COLS = 120;
 const DEFAULT_REMOTE_TERMINAL_ROWS = 30;
@@ -23,6 +24,8 @@ export interface RemoteSessionEntry {
 	closeTimer: ReturnType<typeof setTimeout> | null;
 	errorMessage: string | null;
 	cwd?: string;
+	/** tmux session the shell attaches to; reused when reconnecting. */
+	tmuxSession?: string;
 }
 
 interface AcquireRemoteSessionOptions {
@@ -36,6 +39,8 @@ interface RemoteSessionsState {
 	sessions: Record<string, RemoteSessionEntry>;
 	acquireSession: (options: AcquireRemoteSessionOptions) => Promise<string>;
 	reconnectSession: (options: AcquireRemoteSessionOptions) => Promise<string>;
+	/** Reopen a session's shell with the options it was opened with. */
+	reconnectSessionByKey: (key: string) => Promise<string>;
 	releaseSession: (key: string) => void;
 	destroySession: (key: string) => void;
 	markSessionClosed: (key: string, sessionId: string) => void;
@@ -64,10 +69,7 @@ export function buildRemoteSessionKey(params: {
 export const useRemoteSessionsStore = create<RemoteSessionsState>()(
 	devtools(
 		(set, get) => {
-			const closeShell = (
-				sessionId: string,
-				killTmux = true,
-			): void => {
+			const closeShell = (sessionId: string, killTmux = true): void => {
 				electronTrpcClient.servers.closeShell
 					.mutate({ sessionId, killTmux })
 					.catch((error) => {
@@ -188,6 +190,7 @@ export const useRemoteSessionsStore = create<RemoteSessionsState>()(
 					closeTimer: null,
 					errorMessage: null,
 					cwd: entry?.cwd ?? options.cwd,
+					tmuxSession: options.tmuxSession ?? entry?.tmuxSession,
 				}));
 
 				return openPromise;
@@ -267,6 +270,23 @@ export const useRemoteSessionsStore = create<RemoteSessionsState>()(
 						(existing?.generation ?? 0) + 1,
 						existing.attachedViews,
 					);
+				},
+
+				reconnectSessionByKey: (key) => {
+					const existing = get().sessions[key];
+					if (!existing) {
+						return Promise.reject(
+							new Error(`No remote session to reconnect for ${key}`),
+						);
+					}
+					// The old shell's scrollback is stale once tmux is reattached.
+					clearRemoteTerminalSnapshot(key);
+					return get().reconnectSession({
+						key,
+						serverId: existing.serverId,
+						cwd: existing.cwd,
+						tmuxSession: existing.tmuxSession,
+					});
 				},
 
 				releaseSession: (key) => {

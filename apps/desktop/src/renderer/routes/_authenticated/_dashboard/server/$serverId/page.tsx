@@ -8,7 +8,7 @@ import {
 	DropdownMenuTrigger,
 } from "@superset/ui/dropdown-menu";
 import { createFileRoute } from "@tanstack/react-router";
-import { ChevronDown, Plus, Terminal, X } from "lucide-react";
+import { ChevronDown, Plus, RotateCw, Terminal } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LuPanelRight } from "react-icons/lu";
 import { electronTrpc } from "renderer/lib/electron-trpc";
@@ -26,6 +26,7 @@ import { getSpaceDisplayLabels } from "shared/space-display";
 import { normalizeTerminalTitle } from "shared/terminal-title";
 import { HYPERSET_SESSION_PREFIX, HYPERSET_TMUX } from "shared/tmux";
 import { GhosttySSHTerminal } from "./components/GhosttySSHTerminal";
+import { RemoteTerminalTab } from "./components/RemoteTerminalTab";
 import { SSHTerminal } from "./components/SSHTerminal";
 import { RemoteFileViewer } from "./workspace/$workspaceId/components/RemoteFileViewer";
 
@@ -647,6 +648,18 @@ function ServerPage() {
 		return tabs.find((terminal) => terminal.id === activeTabId) ?? null;
 	}, [activeTabId, tabs]);
 
+	const reconnectSessionByKey = useRemoteSessionsStore(
+		(state) => state.reconnectSessionByKey,
+	);
+	const handleReconnectActiveTerminal = useCallback(() => {
+		if (!activeTabId) return;
+		reconnectSessionByKey(
+			buildRemoteSessionKey({ serverId, terminalId: activeTabId }),
+		).catch((error: unknown) => {
+			console.warn("[ServerPage] reconnect failed", error);
+		});
+	}, [activeTabId, reconnectSessionByKey, serverId]);
+
 	if (!server) {
 		return (
 			<div className="flex h-full items-center justify-center text-sm text-muted-foreground">
@@ -690,39 +703,19 @@ function ServerPage() {
 				<div className="flex shrink-0 items-center border-b border-border bg-muted/30 h-10">
 					<div className="flex h-full flex-1 items-center overflow-x-auto hide-scrollbar">
 						{tabs.map((tab) => (
-							<div
+							<RemoteTerminalTab
 								key={tab.id}
-								role="tab"
-								aria-selected={activeTabId === tab.id}
-								tabIndex={0}
-								className={`group flex h-full shrink-0 items-center gap-1.5 border-r border-border px-3 text-xs transition-colors ${
-									activeTabId === tab.id
-										? "bg-background text-foreground"
-										: "text-muted-foreground hover:bg-background/50 hover:text-foreground"
-								}`}
-								onClick={() => {
+								label={tab.label}
+								isActive={activeTabId === tab.id}
+								sessionKey={buildRemoteSessionKey({
+									serverId,
+									terminalId: tab.id,
+								})}
+								onSelect={() => {
 									navigate({ search: { space: spaceId, tab: tab.id } });
 								}}
-								onKeyDown={(event) => {
-									if (event.key === "Enter" || event.key === " ") {
-										event.preventDefault();
-										navigate({ search: { space: spaceId, tab: tab.id } });
-									}
-								}}
-							>
-								<span className="max-w-48 truncate">{tab.label}</span>
-								<button
-									type="button"
-									className="rounded p-0.5 opacity-0 transition-opacity hover:bg-muted group-hover:opacity-100"
-									onClick={(e) => {
-										e.stopPropagation();
-										handleCloseTab(tab.id);
-									}}
-									tabIndex={-1}
-								>
-									<X className="size-3" />
-								</button>
-							</div>
+								onClose={() => handleCloseTab(tab.id)}
+							/>
 						))}
 					</div>
 
@@ -756,6 +749,13 @@ function ServerPage() {
 								<DropdownMenuItem onClick={handleAddTerminal}>
 									<Plus className="size-3.5 mr-2" />
 									New Terminal
+								</DropdownMenuItem>
+								<DropdownMenuItem
+									disabled={!activeTabId}
+									onClick={handleReconnectActiveTerminal}
+								>
+									<RotateCw className="size-3.5 mr-2" />
+									Reconnect Shell
 								</DropdownMenuItem>
 								<DropdownMenuSeparator />
 								<DropdownMenuLabel className="text-[10px] text-muted-foreground font-normal">
