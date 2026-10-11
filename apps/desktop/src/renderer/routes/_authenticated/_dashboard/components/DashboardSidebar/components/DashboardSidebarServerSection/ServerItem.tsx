@@ -493,7 +493,9 @@ export function ServerSpaceItem({
 											event.stopPropagation();
 											startRename();
 										}}
-										className="flex min-w-0 items-center gap-2 text-left"
+										// The ::after layer stretches the click target over the
+										// whole row; row controls sit above it with `relative z-10`.
+										className="flex min-w-0 items-center gap-2 text-left after:absolute after:inset-0 after:content-['']"
 									>
 										<span
 											className={cn(
@@ -522,7 +524,7 @@ export function ServerSpaceItem({
 												event.stopPropagation();
 												startDirectoryEdit();
 											}}
-											className="w-fit text-left text-xs leading-tight text-muted-foreground/70 hover:text-foreground"
+											className="relative z-10 w-fit text-left text-xs leading-tight text-muted-foreground/70 hover:text-foreground"
 										>
 											Set directory…
 										</button>
@@ -531,7 +533,7 @@ export function ServerSpaceItem({
 							)}
 						</div>
 
-						<div className="invisible ml-1 flex items-center pt-2 opacity-0 transition-[opacity,visibility] group-hover:visible group-hover:opacity-100">
+						<div className="invisible relative z-10 ml-1 flex items-center pt-2 opacity-0 transition-[opacity,visibility] group-hover:visible group-hover:opacity-100">
 							<Tooltip delayDuration={300}>
 								<TooltipTrigger asChild>
 									<button
