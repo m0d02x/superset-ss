@@ -376,12 +376,15 @@ class SSHConnectionManager extends EventEmitter {
 					// Escape sequence notes (DO NOT "simplify" — see below):
 					// - \033[2J\033[H (clear screen + home cursor) preserves xterm
 					//   scrollback. \033c (full RIS reset) would wipe it on every attach.
-					// - '\; set mouse on' chains a tmux command: single-quoted \; is
-					//   tmux's internal separator (not bash's). Enables wheel scroll via
-					//   tmux copy-mode (pane history survives reconnects) + mouse
-					//   forwarding to TUI apps. Idempotent per attach.
+					// - ';' set mouse on' chains a tmux command. The single-quoted ';'
+					//   reaches tmux as a bare ";" argument — tmux's command separator.
+					//   Do NOT use '\;': that hands tmux a literal "\;", and on tmux 3.4
+					//   the new session exits immediately, leaving a plain non-tmux
+					//   shell that cannot be resumed after the app quits.
+					//   Enables wheel scroll via tmux copy-mode + mouse forwarding to
+					//   TUI apps. Idempotent per attach.
 					stream.write(
-						`printf '\\033[2J\\033[H'; TMUX= ${tmuxCmd} new-session -As ${name}${cwdArg} '\\;' set mouse on\n`,
+						`printf '\\033[2J\\033[H'; TMUX= ${tmuxCmd} new-session -As ${name}${cwdArg} ';' set mouse on\n`,
 					);
 				} else if (opts.cwd) {
 					const targetCwd = opts.cwd.trim();
