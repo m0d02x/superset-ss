@@ -661,6 +661,42 @@ export const createServersRouter = () => {
 				manager.resizeShell(input.sessionId, input.cols, input.rows);
 			}),
 
+		/**
+		 * Upload a pasted image (base64 bytes from the renderer's paste event) to
+		 * the server and return its remote path.
+		 */
+		uploadPastedImage: publicProcedure
+			.input(
+				z.object({
+					id: z.string(),
+					data: z.string().min(1),
+					mimeType: z.string().startsWith("image/"),
+				}),
+			)
+			.mutation(async ({ input }) => {
+				const manager = getSSHConnectionManager();
+				const homeResult = await manager.exec(input.id, 'printf %s "$HOME"');
+				const home = homeResult.stdout.trim();
+				if (homeResult.code !== 0 || !home) {
+					throw new Error("Could not resolve remote home directory");
+				}
+
+				// "image/svg+xml" → "svg"; anything unrecognisable falls back to png.
+				const extension =
+					input.mimeType.slice("image/".length).split("+")[0]?.replace(
+						/[^a-z0-9]/gi,
+						"",
+					) || "png";
+				const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+				const remotePath = `${home}/.hyperset/clipboard/paste-${stamp}.${extension}`;
+				await manager.writeRemoteBuffer(
+					input.id,
+					remotePath,
+					Buffer.from(input.data, "base64"),
+				);
+				return { remotePath };
+			}),
+
 		/** Close a shell session */
 		closeShell: publicProcedure
 			.input(

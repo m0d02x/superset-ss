@@ -22,6 +22,8 @@ import {
 	getRemoteTerminalSnapshot,
 	saveRemoteTerminalSnapshot,
 } from "renderer/stores/remote-sessions/view-state";
+import { useTerminalFont } from "../../../hooks/useTerminalFont";
+import { setupRemoteImagePaste } from "../../../utils/setupRemoteImagePaste";
 
 interface SSHTerminalProps {
 	serverId: string;
@@ -44,6 +46,10 @@ export function SSHTerminal({
 	const terminalRef = useRef<XTerm | null>(null);
 	const fitAddonRef = useRef<FitAddon | null>(null);
 	const serializeAddonRef = useRef<SerializeAddon | null>(null);
+	const terminalFont = useTerminalFont(terminalRef, fitAddonRef);
+	// Initial font for xterm construction; later changes apply via the hook.
+	const terminalFontRef = useRef(terminalFont);
+	terminalFontRef.current = terminalFont;
 	const rendererRef = useRef<TerminalRenderer | null>(null);
 	const cacheKey = buildRemoteSessionKey({
 		serverId,
@@ -76,15 +82,23 @@ export function SSHTerminal({
 
 	const writeShell = electronTrpc.servers.writeShell.useMutation();
 	const resizeShell = electronTrpc.servers.resizeShell.useMutation();
+	const uploadPastedImage =
+		electronTrpc.servers.uploadPastedImage.useMutation();
 
 	const writeShellRef = useRef(writeShell.mutate);
 	const resizeShellRef = useRef(resizeShell.mutate);
+	const uploadPastedImageRef = useRef(uploadPastedImage.mutateAsync);
+	const serverIdRef = useRef(serverId);
+	serverIdRef.current = serverId;
 	useEffect(() => {
 		writeShellRef.current = writeShell.mutate;
 	}, [writeShell.mutate]);
 	useEffect(() => {
 		resizeShellRef.current = resizeShell.mutate;
 	}, [resizeShell.mutate]);
+	useEffect(() => {
+		uploadPastedImageRef.current = uploadPastedImage.mutateAsync;
+	}, [uploadPastedImage.mutateAsync]);
 
 	useEffect(() => {
 		if (!initialCwdRef.current && cwd) {
@@ -121,9 +135,7 @@ export function SSHTerminal({
 		const terminal = new XTerm({
 			cursorBlink: true,
 			allowProposedApi: true,
-			fontFamily:
-				'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-			fontSize: 13,
+			...terminalFontRef.current,
 			scrollback: 1500,
 			theme: {
 				background: "#14100f",
@@ -277,12 +289,17 @@ export function SSHTerminal({
 		document.addEventListener("visibilitychange", handleVisibilityChange);
 		window.addEventListener("focus", handleWindowFocus);
 
+		const disposeImagePaste = setupRemoteImagePaste(terminal, (image) =>
+			uploadPastedImageRef.current({ id: serverIdRef.current, ...image }),
+		);
+
 		cleanupRef.current = () => {
 			onDataDispose.dispose();
 			debouncedResize.cancel();
 			resizeObserver.disconnect();
 			document.removeEventListener("visibilitychange", handleVisibilityChange);
 			window.removeEventListener("focus", handleWindowFocus);
+			disposeImagePaste();
 		};
 
 		return () => {

@@ -175,6 +175,36 @@ class SSHConnectionManager extends EventEmitter {
 		localPath: string,
 		remotePath: string,
 	): Promise<void> {
+		const sftp = await this.openSftp(serverId, remotePath);
+		const { promise, resolve, reject } = Promise.withResolvers<void>();
+		sftp.fastPut(localPath, remotePath, (error) => {
+			sftp.end();
+			if (error) reject(error);
+			else resolve();
+		});
+		await promise;
+	}
+
+	/** Write an in-memory buffer to a remote file (parent dirs created). */
+	async writeRemoteBuffer(
+		serverId: string,
+		remotePath: string,
+		data: Buffer,
+	): Promise<void> {
+		const sftp = await this.openSftp(serverId, remotePath);
+		const { promise, resolve, reject } = Promise.withResolvers<void>();
+		sftp.writeFile(remotePath, data, (error) => {
+			sftp.end();
+			if (error) reject(error);
+			else resolve();
+		});
+		await promise;
+	}
+
+	private async openSftp(
+		serverId: string,
+		remotePath: string,
+	): Promise<SFTPWrapper> {
 		const entry = this.connections.get(serverId);
 		if (!entry) {
 			throw new Error(`Not connected to server ${serverId}`);
@@ -186,28 +216,12 @@ class SSHConnectionManager extends EventEmitter {
 			`mkdir -p ${JSON.stringify(dirname(remotePath))} 2>/dev/null`,
 		);
 
-		const sftp = await new Promise<SFTPWrapper>((resolve, reject) => {
-			entry.client.sftp((error, nextSftp) => {
-				if (error) {
-					reject(error);
-					return;
-				}
-
-				resolve(nextSftp);
-			});
+		const { promise, resolve, reject } = Promise.withResolvers<SFTPWrapper>();
+		entry.client.sftp((error, nextSftp) => {
+			if (error) reject(error);
+			else resolve(nextSftp);
 		});
-
-		await new Promise<void>((resolve, reject) => {
-			sftp.fastPut(localPath, remotePath, (error) => {
-				sftp.end();
-				if (error) {
-					reject(error);
-					return;
-				}
-
-				resolve();
-			});
-		});
+		return promise;
 	}
 
 	private acquireExecSlot(serverId: string): Promise<void> {
