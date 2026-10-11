@@ -343,7 +343,9 @@ export class UrlLinkProvider extends MultiLineLinkProvider {
 	}
 
 	protected handleActivation(event: MouseEvent, text: string): void {
-		if (!event.metaKey && !event.ctrlKey) {
+		// Shift is accepted too: with tmux `mouse on` the app captures plain
+		// clicks, and Shift is the standard "talk to the terminal, not the app".
+		if (!event.metaKey && !event.ctrlKey && !event.shiftKey) {
 			return;
 		}
 

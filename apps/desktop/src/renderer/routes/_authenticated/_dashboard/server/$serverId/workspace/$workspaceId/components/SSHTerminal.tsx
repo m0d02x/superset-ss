@@ -7,11 +7,17 @@ import { debounce } from "lodash";
 import { useCallback, useEffect, useRef } from "react";
 import { useTerminalFont } from "renderer/hooks/useTerminalFont";
 import { electronTrpc } from "renderer/lib/electron-trpc";
+import {
+	setupCopyOnSelect,
+	systemClipboardProvider,
+} from "renderer/screens/main/components/WorkspaceView/ContentView/TabsContent/Terminal/clipboard";
 import { RESIZE_DEBOUNCE_MS } from "renderer/screens/main/components/WorkspaceView/ContentView/TabsContent/Terminal/config";
 import {
 	loadRenderer,
+	openTerminalUrl,
 	type TerminalRenderer,
 } from "renderer/screens/main/components/WorkspaceView/ContentView/TabsContent/Terminal/helpers";
+import { UrlLinkProvider } from "renderer/screens/main/components/WorkspaceView/ContentView/TabsContent/Terminal/link-providers";
 import { WriteBatcher } from "renderer/screens/main/components/WorkspaceView/ContentView/TabsContent/Terminal/write-batcher";
 import {
 	buildRemoteSessionKey,
@@ -142,7 +148,7 @@ export function SSHTerminal({
 		});
 		terminalRef.current = terminal;
 		terminal.loadAddon(fitAddon);
-		terminal.loadAddon(new ClipboardAddon());
+		terminal.loadAddon(new ClipboardAddon(undefined, systemClipboardProvider));
 		const serializeAddon = new SerializeAddon();
 		serializeAddonRef.current = serializeAddon;
 		terminal.loadAddon(serializeAddon);
@@ -173,8 +179,14 @@ export function SSHTerminal({
 		// Attach write batcher
 		batcherRef.current.attach(terminal);
 
+		terminal.registerLinkProvider(
+			new UrlLinkProvider(terminal, (_event, uri) => openTerminalUrl(uri)),
+		);
+		const cleanupCopyOnSelect = setupCopyOnSelect(terminal);
+
 		return () => {
 			titleDisposable.dispose();
+			cleanupCopyOnSelect();
 			if (serializeAddonRef.current) {
 				saveRemoteTerminalSnapshot({
 					key: cacheKey,
@@ -213,7 +225,14 @@ export function SSHTerminal({
 			cancelled = true;
 			releaseSession(cacheKey);
 		};
-	}, [acquireSession, cacheKey, releaseSession, serverId]);
+	}, [
+		acquireSession,
+		cacheKey,
+		releaseSession,
+		serverId,
+		terminalId,
+		workspaceId,
+	]);
 
 	useEffect(() => {
 		const container = containerRef.current;

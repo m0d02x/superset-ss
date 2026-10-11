@@ -22,10 +22,24 @@ import {
 	DEFAULT_THEME_ID,
 	getTerminalColors,
 } from "shared/themes";
+import { systemClipboardProvider } from "./clipboard";
 import { RESIZE_DEBOUNCE_MS, TERMINAL_OPTIONS } from "./config";
 import { FilePathLinkProvider, UrlLinkProvider } from "./link-providers";
 import { suppressQueryResponses } from "./suppressQueryResponses";
 import { scrollToBottom } from "./utils";
+
+/** Open a terminal link in the user's default browser, surfacing failures. */
+export function openTerminalUrl(uri: string): void {
+	trpcClient.external.openUrl.mutate(uri).catch((error) => {
+		console.error("[Terminal] Failed to open URL:", uri, error);
+		toast.error("Failed to open URL", {
+			description:
+				error instanceof Error
+					? error.message
+					: "Could not open URL in browser",
+		});
+	});
+}
 
 /**
  * Get the default terminal theme from localStorage cache.
@@ -194,7 +208,7 @@ export function createTerminalInstance(
 	const xterm = new XTerm(terminalOptions);
 	const fitAddon = new FitAddon();
 
-	const clipboardAddon = new ClipboardAddon();
+	const clipboardAddon = new ClipboardAddon(undefined, systemClipboardProvider);
 	const unicode11Addon = new Unicode11Addon();
 
 	// Track cleanup state to prevent operations on disposed terminal
@@ -264,15 +278,7 @@ export function createTerminalInstance(
 			handler(uri);
 			return;
 		}
-		trpcClient.external.openUrl.mutate(uri).catch((error) => {
-			console.error("[Terminal] Failed to open URL:", uri, error);
-			toast.error("Failed to open URL", {
-				description:
-					error instanceof Error
-						? error.message
-						: "Could not open URL in browser",
-			});
-		});
+		openTerminalUrl(uri);
 	});
 	xterm.registerLinkProvider(urlLinkProvider);
 

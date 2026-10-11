@@ -811,6 +811,24 @@ describe("UrlLinkProvider", () => {
 
 			expect(onOpen).toHaveBeenCalled();
 		});
+
+		it("should activate with shiftKey (bypasses tmux mouse capture)", async () => {
+			const terminal = createMockTerminal([{ text: "https://example.com" }]);
+			const onOpen = mock();
+			const provider = new UrlLinkProvider(terminal, onOpen);
+
+			const links = await getLinks(provider, 1);
+			const mockEvent = {
+				metaKey: false,
+				ctrlKey: false,
+				shiftKey: true,
+				preventDefault: mock(),
+			} as unknown as MouseEvent;
+
+			links[0].activate(mockEvent, "https://example.com");
+
+			expect(onOpen.mock.calls[0]?.[1]).toBe("https://example.com");
+		});
 	});
 
 	describe("ReDoS prevention", () => {

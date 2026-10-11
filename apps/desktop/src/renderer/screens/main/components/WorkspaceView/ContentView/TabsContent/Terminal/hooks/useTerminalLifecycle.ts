@@ -9,6 +9,7 @@ import { useTabsStore } from "renderer/stores/tabs/store";
 import { killTerminalForPane } from "renderer/stores/tabs/utils/terminal-cleanup";
 import { isTerminalAttachCanceledMessage } from "../attach-cancel";
 import { scheduleTerminalAttach } from "../attach-scheduler";
+import { setupCopyOnSelect } from "../clipboard";
 import { isCommandEchoed, sanitizeForTitle } from "../commandBuffer";
 import { DEBUG_TERMINAL, FIRST_RENDER_RESTORE_FALLBACK_MS } from "../config";
 import {
@@ -742,6 +743,7 @@ export function useTerminalLifecycle({
 			isBracketedPasteEnabled: () => isBracketedPasteRef.current,
 		});
 		const cleanupCopy = setupCopyHandler(xterm);
+		const cleanupCopyOnSelect = setupCopyOnSelect(xterm);
 		const reattachRecovery = {
 			throttleMs: 120,
 			pendingFrame: null as number | null,
@@ -885,6 +887,7 @@ export function useTerminalLifecycle({
 			cleanupResize();
 			cleanupPaste();
 			cleanupCopy();
+			cleanupCopyOnSelect();
 			cleanupQuerySuppression();
 			unregisterClearCallbackRef.current(paneId);
 			unregisterScrollToBottomCallbackRef.current(paneId);
