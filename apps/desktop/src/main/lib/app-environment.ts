@@ -8,13 +8,29 @@ import {
 import { homedir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
-import { app } from "electron";
+import type * as Electron from "electron";
 import { SUPERSET_DIR_NAME } from "shared/constants";
 
 const SUPERSET_HOME_DIR_ENV = "SUPERSET_HOME_DIR";
 
+/**
+ * True only inside a packaged Electron main process. This module is also
+ * loaded by the terminal-host daemon, which runs with ELECTRON_RUN_AS_NODE
+ * where the "electron" module does not exist — a static import there crashes
+ * the daemon at startup. The daemon inherits SUPERSET_HOME_DIR from the app,
+ * so it never needs this fallback.
+ */
+function isPackagedElectronApp(): boolean {
+	try {
+		const { app } = require("electron") as typeof Electron;
+		return typeof app?.isPackaged === "boolean" && app.isPackaged;
+	} catch {
+		return false;
+	}
+}
+
 function getDefaultSupersetHomeDir(): string {
-	if (typeof app?.isPackaged === "boolean" && app.isPackaged) {
+	if (isPackagedElectronApp()) {
 		return join(homedir(), ".hyperset");
 	}
 
